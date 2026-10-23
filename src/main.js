@@ -208,8 +208,12 @@ function createWindow() {
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.once('ready-to-show', () => win.show());
+  let boundsTimer = null;
   const persistBounds = () => {
-    if (!win.isMinimized() && !win.isMaximized()) saveSettings({ windowBounds: win.getBounds() });
+    clearTimeout(boundsTimer);
+    boundsTimer = setTimeout(() => {
+      if (win && !win.isDestroyed() && !win.isMinimized() && !win.isMaximized()) saveSettings({ windowBounds: win.getBounds() });
+    }, 400);
   };
   win.on('resize', persistBounds);
   win.on('move', persistBounds);
