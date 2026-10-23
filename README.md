@@ -64,6 +64,12 @@ npm run dist       # build the Windows installer + portable exe into dist/
 npm run dist:mac   # build a macOS .dmg (run on a Mac)
 ```
 
+Pushing to GitHub and running the **Build installers** workflow (Actions tab →
+Run workflow) builds both installers on GitHub's machines and publishes them
+on the Releases page. Building the Windows installer on Linux needs Wine (with
+32-bit support); on Linux without it, pass
+`-c.win.signAndEditExecutable=false` to skip stamping the icon into the exe.
+
 ## How it works
 
 - `src/main.js` — Electron main process: window, file dialogs, disk I/O,
