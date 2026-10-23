@@ -1,0 +1,67 @@
+{
+  "name": "masterdebater",
+  "productName": "MasterDebater",
+  "version": "1.0.0",
+  "description": "Click-to-add speech doc builder for debate blocks stored in a Word document.",
+  "main": "src/main.js",
+  "author": "Zik3434",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "test": "node test/docx.test.js"
+  },
+  "devDependencies": {
+    "@xmldom/xmldom": "^0.9.6",
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8",
+    "jszip": "^3.10.1",
+    "playwright-core": "^1.49.1"
+  },
+  "build": {
+    "appId": "com.zik3434.masterdebater",
+    "productName": "MasterDebater",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    }
+  }
+}

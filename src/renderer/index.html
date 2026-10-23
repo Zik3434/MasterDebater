@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <title>MasterDebater</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">MD</span>
+      <span class="brand-name">MasterDebater</span>
+    </div>
+    <div class="file-area">
+      <button id="btn-open" class="btn" title="Open the Word document that holds your blocks (Ctrl+O)">Open blocks doc…</button>
+      <span id="file-name" class="file-name" title="">No blocks document open</span>
+      <label class="level-label" title="Which heading level separates one block from the next">
+        Split at
+        <select id="level-select"></select>
+      </label>
+    </div>
+    <div class="actions">
+      <button id="btn-copy" class="btn" title="Copy the whole speech so you can paste it into Word (Ctrl+Shift+C)">Copy</button>
+      <button id="btn-save" class="btn" title="Save the speech as a .docx (Ctrl+S)">Save .docx</button>
+      <button id="btn-save-open" class="btn primary" title="Save the speech and open it in Word (Ctrl+Enter)">Save &amp; open in Word</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <button id="btn-reset" class="btn danger wide" title="Remove every block from the speech (Ctrl+Shift+R)">Reset speech</button>
+        <input id="search" type="search" placeholder="Find a block… (Ctrl+F, Enter adds first match)" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="block-list" class="block-list" role="listbox" aria-label="Blocks"></div>
+      <div id="sidebar-empty" class="empty hidden">
+        <p><strong>No blocks yet.</strong></p>
+        <p>Open the Word document that holds your blocks. Every heading (Heading 1, Heading 2…) becomes a block you can click.</p>
+        <button id="btn-open-2" class="btn primary">Open blocks doc…</button>
+      </div>
+    </aside>
+
+    <section class="speech">
+      <div class="speech-head">
+        <h2>Speech doc</h2>
+        <span id="speech-stats" class="muted">Empty</span>
+      </div>
+      <div id="speech" class="speech-body">
+        <div id="speech-empty" class="empty">
+          <p><strong>Nothing here yet.</strong></p>
+          <p>Click a block on the left to add it. Click it again to take it out. Blocks appear in the order you add them.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span id="status-left" class="muted"></span>
+    <span id="status-right" class="muted"></span>
+  </footer>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="vendor/jszip.min.js"></script>
+  <script src="docx.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
