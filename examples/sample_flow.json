@@ -1,0 +1,12 @@
+{"flow_type":"LD Traditional Flow",
+ "flow-data":[
+  [["FW: util - maximize wellbeing (Bentham)","FW: deont - rights can't be traded off; util justifies atrocities","",null,null],
+   ["C1: Policy saves 40k lives/yr (Smith 23)","Smith is outdated - pre-2024 data; also no solvency, no enforcement","",null,null],
+   ["C2: Econ growth -> 2% GDP (Lee 22)","Non-unique, growth happening now anyway",null,null,null],
+   ["","Turn: policy increases black market -> MORE deaths (Garcia 21)","",null,null],
+   [null,null,null,null,null]],
+  [["NC: Kant - treat as ends; policy uses ppl as means","","",""],
+   ["NC C1: Privacy violations - surveillance (Jones 20)","","",""],
+   [null,null,null,null]]
+ ],
+ "boldElements":[[],[]]}
