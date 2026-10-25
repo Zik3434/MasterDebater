@@ -5,8 +5,8 @@ Run:  streamlit run app.py
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -20,77 +20,115 @@ from masterdebater.materials import bundle_materials, read_material_bytes
 st.set_page_config(page_title="MasterDebater", page_icon="🎤", layout="wide")
 
 # --------------------------------------------------------------------------- state
-if "round" not in st.session_state:
-    st.session_state["round"] = store.load_round()
-if "materials" not in st.session_state:
-    st.session_state["materials"] = store.load_materials()
-if "grid_version" not in st.session_state:
-    st.session_state["grid_version"] = 0
-if "live" not in st.session_state:
-    st.session_state["live"] = None   # speech being streamed right now
+ss = st.session_state
+ss.setdefault("round", store.load_round())
+ss.setdefault("materials", store.load_materials())
+ss.setdefault("grid_version", 0)
+ss.setdefault("wpm", cc.DEFAULT_WPM)
+ss.setdefault("focus", None)   # None | "flow" | "speech"  -> full-screen mode
 
-rnd: dict = st.session_state["round"]
-mats: dict = st.session_state["materials"]
+rnd: dict = ss["round"]
+mats: dict = ss["materials"]
 fmt = store.format_by_key(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
+side: str = rnd.get("side", "aff")
+focus: str | None = ss["focus"]
 
 
 def bump_grids() -> None:
     """Force every data editor to reload from `rnd` (after import / reset / add sheet)."""
-    st.session_state["grid_version"] += 1
+    ss["grid_version"] += 1
 
+
+def enter_focus(view: str) -> None:
+    ss["focus"] = view
+    bump_grids()   # the grid is rebuilt at a new size; re-snapshot it from the saved rows
+
+
+def exit_focus() -> None:
+    ss["focus"] = None
+    bump_grids()
+
+
+FOCUS_CSS = """
+<style>
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"], header[data-testid="stHeader"] { display: none !important; }
+.block-container { padding-top: 0.6rem !important; padding-bottom: 0 !important; max-width: 100% !important; }
+</style>
+"""
 
 # --------------------------------------------------------------------------- sidebar
-with st.sidebar:
-    st.title("MasterDebater")
-    st.caption(f"Model `{cc.MODEL}`")
+if focus is None:
+    with st.sidebar:
+        st.title("MasterDebater")
+        st.caption(f"Model `{cc.MODEL}`")
 
-    side = st.radio(
-        "I am the", ["aff", "neg"], index=0 if rnd.get("side", "aff") == "aff" else 1,
-        format_func=lambda s: fmt.side_labels[s], horizontal=True,
-    )
-    rnd["side"] = side
+        side = st.radio(
+            "I am the", ["aff", "neg"], index=0 if side == "aff" else 1,
+            format_func=lambda s: fmt.side_labels[s], horizontal=True,
+        )
+        rnd["side"] = side
 
-    fmt_choice = st.selectbox(
-        "Format", ["ld", "policy", "pf"], index=["ld", "policy", "pf"].index(rnd.get("format", "ld")),
-        format_func=lambda k: {"ld": "Lincoln-Douglas", "policy": "Policy", "pf": "Public Forum"}[k],
-    )
-    first_speaker = rnd.get("first_speaker", "pro")
-    if fmt_choice == "pf":
-        first_speaker = st.radio("Who speaks first?", ["pro", "con"], index=0 if first_speaker == "pro" else 1, horizontal=True)
-    if fmt_choice != rnd.get("format") or first_speaker != rnd.get("first_speaker"):
-        if st.button("Switch format (starts a new round)", use_container_width=True):
-            st.session_state["round"] = store.new_round(fmt_choice, first_speaker)
-            st.session_state["round"]["side"] = side
-            store.save_round(st.session_state["round"])
+        fmt_choice = st.selectbox(
+            "Format", ["ld", "policy", "pf"], index=["ld", "policy", "pf"].index(rnd.get("format", "ld")),
+            format_func=lambda k: {"ld": "Lincoln-Douglas", "policy": "Policy", "pf": "Public Forum"}[k],
+        )
+        first_speaker = rnd.get("first_speaker", "pro")
+        if fmt_choice == "pf":
+            first_speaker = st.radio("Who speaks first?", ["pro", "con"],
+                                     index=0 if first_speaker == "pro" else 1, horizontal=True)
+        if fmt_choice != rnd.get("format") or first_speaker != rnd.get("first_speaker"):
+            if st.button("Switch format (starts a new round)", use_container_width=True):
+                ss["round"] = store.new_round(fmt_choice, first_speaker)
+                ss["round"]["side"] = side
+                store.save_round(ss["round"])
+                bump_grids()
+                st.rerun()
+
+        ss["wpm"] = st.slider("Speaking rate (wpm)", 120, 350, ss["wpm"], 10)
+
+        st.divider()
+        rnd["name"] = st.text_input("Round name", rnd.get("name", ""))
+        if st.button("New round (clears the flow)", use_container_width=True):
+            ss["round"] = store.new_round(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
+            ss["round"]["side"] = side
+            store.save_round(ss["round"])
             bump_grids()
             st.rerun()
 
-    wpm = st.slider("Speaking rate (wpm)", 120, 350, cc.DEFAULT_WPM, 10)
+        n_files = len(mats.get("files", []))
+        n_words = len(mats.get("pasted", "").split()) + sum(len(f["text"].split()) for f in mats.get("files", []))
+        if n_words:
+            st.success(f"Case loaded: {n_files} file(s), {n_words:,} words")
+        else:
+            st.warning("No case loaded yet. Open the Case & Blocks tab.")
 
-    st.divider()
-    rnd["name"] = st.text_input("Round name", rnd.get("name", ""))
-    if st.button("New round (clears the flow)", use_container_width=True):
-        st.session_state["round"] = store.new_round(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
-        st.session_state["round"]["side"] = side
-        store.save_round(st.session_state["round"])
-        bump_grids()
-        st.rerun()
+wpm: int = ss["wpm"]
 
-    n_files = len(mats.get("files", []))
-    n_words = len(mats.get("pasted", "").split()) + sum(len(f["text"].split()) for f in mats.get("files", []))
-    if n_words:
-        st.success(f"Case loaded: {n_files} file(s), {n_words:,} words")
-    else:
-        st.warning("No case loaded yet. Open the Case & Blocks tab.")
 
-# --------------------------------------------------------------------------- tabs
-tab_flow, tab_speech, tab_case = st.tabs(["Flow", "Speech", "Case & Blocks"])
+# --------------------------------------------------------------------------- views
+def focus_bar(view: str) -> None:
+    """Top strip shown only in full-screen mode."""
+    left, right = st.columns([6, 1])
+    with left:
+        other = "speech" if view == "flow" else "flow"
+        label = {"flow": "Flow", "speech": "Speech"}
+        st.caption(
+            f"**{label[view]}** · {fmt.side_labels[side]} · {rnd.get('name', '')} · "
+            f"press F11 in the browser to hide its tabs too"
+        )
+    with right:
+        c1, c2 = st.columns(2)
+        c1.button(f"→ {label[other]}", use_container_width=True, on_click=enter_focus, args=(other,),
+                  help=f"Switch the full-screen view to {label[other]}")
+        c2.button("✕ Exit", use_container_width=True, on_click=exit_focus, help="Back to the normal layout")
 
-# ------------------------------------------------------------------ FLOW TAB
-with tab_flow:
+
+def render_flow(full: bool) -> None:
     sheet_names = [s["name"] for s in rnd["sheets"]]
     sub = st.tabs(sheet_names + ["Cross-ex", "Notes", "Sheets & import"])
-    v = st.session_state["grid_version"]
+    v = ss["grid_version"]
+    grid_height = 760 if full else 560
 
     for i, (tab, sheet) in enumerate(zip(sub, rnd["sheets"])):
         with tab:
@@ -98,15 +136,15 @@ with tab_flow:
             # The editor keeps its own diff on top of the frame we pass in, so pass the SAME
             # base frame every rerun (snapshotted per grid version) and treat its output as truth.
             base_key = f"base_{v}_{i}"
-            if base_key not in st.session_state:
-                st.session_state[base_key] = pd.DataFrame(sheet["rows"], columns=cols).astype(str)
+            if base_key not in ss:
+                ss[base_key] = pd.DataFrame(sheet["rows"], columns=cols).astype(str)
             edited = st.data_editor(
-                st.session_state[base_key],
+                ss[base_key],
                 key=f"grid_{v}_{i}",
                 num_rows="dynamic",
                 use_container_width=True,
                 hide_index=True,
-                height=560,
+                height=grid_height,
                 # A small base width per column: Streamlit spreads the leftover space evenly,
                 # so every speech column stays on screen at once, the way Flexcel lays it out.
                 column_config={c: st.column_config.TextColumn(c, width=120) for c in cols},
@@ -114,19 +152,22 @@ with tab_flow:
             rows = edited.fillna("").astype(str).values.tolist()
             if rows != sheet["rows"]:
                 sheet["rows"] = rows
-            st.caption("Click a cell and type. Enter moves down, Tab moves right. Rows are argument threads: the first column is the argument, the columns to its right are the answers to it.")
+            if not full:
+                st.caption("Click a cell and type. Enter moves down, Tab moves right. Rows are argument "
+                           "threads: the first column is the argument, the columns to its right answer it.")
 
     with sub[len(sheet_names)]:
         c1, c2 = st.columns(2)
+        h = 640 if full else 420
         with c1:
-            rnd["cx"]["ask"] = st.text_area("Questions I want to ask", rnd["cx"].get("ask", ""), height=420,
+            rnd["cx"]["ask"] = st.text_area("Questions I want to ask", rnd["cx"].get("ask", ""), height=h,
                                             placeholder="One per line. The speech writer sees these.")
         with c2:
-            rnd["cx"]["answers"] = st.text_area("What they said in cross-ex", rnd["cx"].get("answers", ""), height=420,
-                                                placeholder="Concessions, clarifications, anything you want used in the speech.")
+            rnd["cx"]["answers"] = st.text_area("What they said in cross-ex", rnd["cx"].get("answers", ""), height=h,
+                                                placeholder="Concessions, clarifications, anything to use in the speech.")
 
     with sub[len(sheet_names) + 1]:
-        rnd["notes"] = st.text_area("Notes for this round", rnd.get("notes", ""), height=420,
+        rnd["notes"] = st.text_area("Notes for this round", rnd.get("notes", ""), height=640 if full else 420,
                                     placeholder="Judge paradigm, what to collapse to, anything else.")
 
     with sub[len(sheet_names) + 2]:
@@ -153,9 +194,8 @@ with tab_flow:
         st.subheader("Import a Flexcel save")
         fx = st.file_uploader("Flexcel .json", type=["json"], key="flexcel_import")
         if fx is not None and st.button("Replace my flow with this file"):
-            import json as _json
             try:
-                flow = parse_flexcel(_json.load(fx))
+                flow = parse_flexcel(json.load(fx))
                 rnd["sheets"] = store.sheets_from_flow(flow)
                 rnd["format"] = flow.format.key
                 rnd["first_speaker"] = flow.first_speaker
@@ -165,8 +205,8 @@ with tab_flow:
             except Exception as e:  # noqa: BLE001
                 st.error(f"Could not read that file: {e}")
 
-# ------------------------------------------------------------------ SPEECH TAB
-with tab_speech:
+
+def render_speech(full: bool) -> None:
     flow = store.round_to_flow(rnd)
     mine = [s.name for s in fmt.speeches_for(side)]
     suggested = next_speech(flow, side)
@@ -225,10 +265,12 @@ with tab_speech:
     if not rnd["speeches"]:
         st.info("Your speech will appear here. Flow the round, then click Write.")
     for n, spch in enumerate(rnd["speeches"]):
-        with st.expander(f"{spch['speech']} — {spch['words']} words (target {spch['target']}) — {spch['at']}", expanded=(n == 0)):
+        title = f"{spch['speech']} — {spch['words']} words (target {spch['target']}) — {spch['at']}"
+        with st.expander(title, expanded=(n == 0)):
             if spch.get("fallback"):
                 st.caption(f"Served by fallback model {spch.get('model')}")
-            edited = st.text_area("Speech (edit freely, this is what you read)", spch["text"], height=520, key=f"speech_{spch['speech']}_{spch['at']}")
+            edited = st.text_area("Speech (edit freely, this is what you read)", spch["text"],
+                                  height=(720 if full else 520), key=f"speech_{spch['speech']}_{spch['at']}")
             if edited != spch["text"]:
                 spch["text"] = edited
                 spch["words"] = len(edited.split())
@@ -236,24 +278,23 @@ with tab_speech:
             if spch.get("notes"):
                 with st.expander("Coach notes: coverage, missing cards, risks"):
                     st.markdown(spch["notes"])
-            out = store.SPEECH_DIR / f"{rnd['name']}".replace("/", "-")
-            out = out / f"{spch['speech'].replace('/', '-')}_{spch['side']}.docx"
+            out = store.SPEECH_DIR / rnd["name"].replace("/", "-") / f"{spch['speech'].replace('/', '-')}_{spch['side']}.docx"
             write_speech_docx(out, spch["speech"], fmt.side_labels[spch["side"]], spch["text"], spch.get("notes"),
                               word_count=spch["words"], minutes=fmt.speech(spch["speech"]).minutes)
             st.download_button("Download as Word", data=out.read_bytes(), file_name=out.name,
                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                key=f"dl_{spch['speech']}_{spch['at']}")
 
-# ------------------------------------------------------------------ CASE TAB
-with tab_case:
+
+def render_case() -> None:
     st.caption("Load this once. It stays saved on this computer until you change it. "
                "The speech writer may only quote what is here.")
     c1, c2 = st.columns([1.4, 1])
     with c1:
         pasted = st.text_area(
             "Paste your case, blocks and cards", mats.get("pasted", ""), height=560,
-            placeholder="Open your case in Google Docs or Word, select all (Ctrl+A), copy (Ctrl+C), paste here (Ctrl+V). "
-                        "Paste more files below it; headings help the writer find blocks.",
+            placeholder="Open your case in Google Docs or Word, select all (Ctrl+A), copy (Ctrl+C), paste here "
+                        "(Ctrl+V). Paste more files below it; headings help the writer find blocks.",
         )
         if pasted != mats.get("pasted", ""):
             mats["pasted"] = pasted
@@ -262,7 +303,6 @@ with tab_case:
         st.subheader("Or upload files")
         ups = st.file_uploader("Word, PDF, txt, md", type=["docx", "pdf", "txt", "md"], accept_multiple_files=True)
         if ups and st.button("Add these files"):
-            known = {f["name"] for f in mats["files"]}
             for u in ups:
                 try:
                     text = read_material_bytes(u.name, u.getvalue())
@@ -282,6 +322,29 @@ with tab_case:
                     mats["files"] = [x for x in mats["files"] if x["name"] != f["name"]]
                     store.save_materials(mats)
                     st.rerun()
+
+
+# --------------------------------------------------------------------------- layout
+if focus == "flow":
+    st.markdown(FOCUS_CSS, unsafe_allow_html=True)
+    focus_bar("flow")
+    render_flow(full=True)
+elif focus == "speech":
+    st.markdown(FOCUS_CSS, unsafe_allow_html=True)
+    focus_bar("speech")
+    render_speech(full=True)
+else:
+    tab_flow, tab_speech, tab_case = st.tabs(["Flow", "Speech", "Case & Blocks"])
+    with tab_flow:
+        st.button("⛶ Full screen", key="fs_flow", on_click=enter_focus, args=("flow",),
+                  help="Hide the sidebar and tabs so the flow fills the window")
+        render_flow(full=False)
+    with tab_speech:
+        st.button("⛶ Full screen", key="fs_speech", on_click=enter_focus, args=("speech",),
+                  help="Hide the sidebar and tabs so the speech fills the window")
+        render_speech(full=False)
+    with tab_case:
+        render_case()
 
 # --------------------------------------------------------------------------- autosave
 store.save_round(rnd)

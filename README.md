@@ -15,6 +15,8 @@ Everything happens inside one window with three tabs:
   1NC for LD, with the same columns Flexcel uses), plus Cross-ex and Notes tabs and a way to
   add sheets for off-case positions. It autosaves on every edit, so a refresh or crash loses
   nothing. You can also import a Flexcel `.json` if you flowed there instead.
+* **Full screen.** A button on the Flow and Speech tabs hides the sidebar and the tab bar so
+  that one view fills the window; press F11 in the browser to hide its tabs too.
 * **Speech.** Pick Aff/Neg in the sidebar; the app looks at what is flowed and picks your next
   speech (1AC and 1NC flowed and you are Aff, so it writes the 1AR). Click **Write**. The speech
   streams onto the page, stays there editable, and can be downloaded as `.docx`. Earlier
