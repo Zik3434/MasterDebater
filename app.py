@@ -105,8 +105,11 @@ with tab_flow:
                 key=f"grid_{v}_{i}",
                 num_rows="dynamic",
                 use_container_width=True,
+                hide_index=True,
                 height=560,
-                column_config={c: st.column_config.TextColumn(c, width="large") for c in cols},
+                # A small base width per column: Streamlit spreads the leftover space evenly,
+                # so every speech column stays on screen at once, the way Flexcel lays it out.
+                column_config={c: st.column_config.TextColumn(c, width=120) for c in cols},
             )
             rows = edited.fillna("").astype(str).values.tolist()
             if rows != sheet["rows"]:
