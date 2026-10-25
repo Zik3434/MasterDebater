@@ -169,6 +169,7 @@ def build_speech_prompt(
     materials_text: str,
     wpm: int,
     extra_instructions: str = "",
+    round_context: str = "",
 ) -> str:
     side_label = fmt.side_labels[side]
     opp_label = fmt.side_labels["neg" if side == "aff" else "aff"]
@@ -192,6 +193,12 @@ def build_speech_prompt(
         parts.append("EXTRA INSTRUCTIONS FROM THE DEBATER:\n" + extra_instructions.strip())
 
     parts.append("=== FLOW ===\n" + (flow.to_text() or "(empty flow)"))
+    if round_context.strip():
+        parts.append(
+            "=== ROUND CONTEXT (my cross-ex questions/answers, notes, and the speeches I "
+            "already gave this round; use for consistency, not as evidence) ===\n"
+            + round_context.strip()
+        )
     parts.append("=== MATERIALS (the only evidence you may use) ===\n" + materials_text)
     parts.append(f"Write my {speech.name} now.")
     return "\n\n".join(parts)
@@ -224,6 +231,7 @@ def generate_speech(
     extra_instructions: str = "",
     client: anthropic.Anthropic | None = None,
     on_text=None,
+    round_context: str = "",
 ) -> SpeechResult:
     """Write the requested speech. `on_text(chunk)` receives streamed text if given."""
     client = client or make_client()
@@ -232,7 +240,9 @@ def generate_speech(
     if speech.side != side:
         raise ValueError(f"{speech_name} belongs to the {fmt.side_labels[speech.side]}, not the {fmt.side_labels[side]}")
 
-    prompt = build_speech_prompt(flow, fmt, speech, side, materials_text, wpm, extra_instructions)
+    prompt = build_speech_prompt(
+        flow, fmt, speech, side, materials_text, wpm, extra_instructions, round_context
+    )
 
     with client.beta.messages.stream(
         model=MODEL,

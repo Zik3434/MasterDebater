@@ -9,21 +9,24 @@ four flow templates Flexcel ships.
 
 ## How it works
 
-1. **Flow in.** Two ways:
-   * **Flexcel save file (recommended).** Press `Ctrl+S` in Flexcel and save the flow as `.json`.
-     That file holds every sheet and every cell exactly as you typed it, so nothing is lost.
-   * **Screenshot.** Upload a screenshot of Flexcel, or let the app capture your screen. Claude
-     reads the grid into the same structure. Only the sheet that is visible gets read, so the
-     `.json` route is better once the round has more than one sheet.
-2. **Materials in.** Upload your case / blocks / cards as Word, PDF, txt or Markdown. These are
-   the only sources the speech may quote. The writer is told to never invent a card, author,
-   statistic or year, and to tag anything it cannot support with `[NO CARD - analytic]`.
-3. **Side + speech.** Choose Aff/Pro or Neg/Con. The app finds the last speech with anything
-   flowed and picks your next one (for example 1AC and 1NC flowed and you are Neg, so it writes
-   the 2NR). You can override the speech.
-4. **Speech out.** The speech streams onto the page as it is written, then you download it as a
-   `.docx`. A separate "Coach notes" section lists what was answered, extended, kicked or dropped,
-   plus any analytic-only answers, so you can sanity-check coverage before you stand up.
+Everything happens inside one window with three tabs:
+
+* **Flow.** A Flexcel-style flow you type into during the round. One sheet per case (1AC and
+  1NC for LD, with the same columns Flexcel uses), plus Cross-ex and Notes tabs and a way to
+  add sheets for off-case positions. It autosaves on every edit, so a refresh or crash loses
+  nothing. You can also import a Flexcel `.json` if you flowed there instead.
+* **Speech.** Pick Aff/Neg in the sidebar; the app looks at what is flowed and picks your next
+  speech (1AC and 1NC flowed and you are Aff, so it writes the 1AR). Click **Write**. The speech
+  streams onto the page, stays there editable, and can be downloaded as `.docx`. Earlier
+  speeches from the round stay underneath, and the writer sees them so the 2AR is consistent
+  with the 1AR. A **Coach notes** panel lists what was answered, extended, kicked or dropped,
+  plus anything marked `[NO CARD - analytic]`.
+* **Case & Blocks.** Paste your case, blocks and cards straight from Google Docs or Word, or
+  upload files. Loaded once, saved on the computer, used for every round. These are the only
+  sources the speech may quote. The writer is told to never invent a card, author, statistic
+  or year.
+
+Supports Lincoln-Douglas, Policy, and Public Forum.
 
 ## Setup (Windows, macOS or Linux)
 
@@ -51,7 +54,7 @@ streamlit run app.py
 
 A browser tab opens. Keep it next to Flexcel.
 
-## Command line
+## Command line (Flexcel files or screenshots)
 
 ```bash
 # Flexcel .json, you are Neg, next speech auto-picked, materials attached

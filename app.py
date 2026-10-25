@@ -1,134 +1,195 @@
-"""MasterDebater desktop UI (Streamlit).
+"""MasterDebater: flow the round here, keep your case here, get the speech here.
 
 Run:  streamlit run app.py
 """
 
 from __future__ import annotations
 
-import json
-import tempfile
+from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from masterdebater import claude_client as cc
-from masterdebater.capture import capture_screen, list_monitors
+from masterdebater import store
 from masterdebater.docx_out import write_speech_docx
-from masterdebater.flow import Flow, next_speech, parse_flexcel
+from masterdebater.flow import next_speech, parse_flexcel
 from masterdebater.materials import bundle_materials, read_material_bytes
 
 st.set_page_config(page_title="MasterDebater", page_icon="🎤", layout="wide")
-st.title("MasterDebater")
-st.caption(f"Flexcel flow → your next speech. Model: `{cc.MODEL}`. Evidence comes only from the files you upload.")
 
-if "flow" not in st.session_state:
-    st.session_state.flow = None
-if "result" not in st.session_state:
-    st.session_state.result = None
+# --------------------------------------------------------------------------- state
+if "round" not in st.session_state:
+    st.session_state["round"] = store.load_round()
+if "materials" not in st.session_state:
+    st.session_state["materials"] = store.load_materials()
+if "grid_version" not in st.session_state:
+    st.session_state["grid_version"] = 0
+if "live" not in st.session_state:
+    st.session_state["live"] = None   # speech being streamed right now
+
+rnd: dict = st.session_state["round"]
+mats: dict = st.session_state["materials"]
+fmt = store.format_by_key(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
+
+
+def bump_grids() -> None:
+    """Force every data editor to reload from `rnd` (after import / reset / add sheet)."""
+    st.session_state["grid_version"] += 1
+
 
 # --------------------------------------------------------------------------- sidebar
 with st.sidebar:
-    st.header("1. Who am I?")
-    side = st.radio("Side", ["aff", "neg"], format_func=lambda s: {"aff": "Affirmative / Pro", "neg": "Negative / Con"}[s], horizontal=True)
-    wpm = st.slider("Speaking rate (words per minute)", 120, 350, cc.DEFAULT_WPM, 10)
+    st.title("MasterDebater")
+    st.caption(f"Model `{cc.MODEL}`")
 
-    st.header("2. My case & blocks")
-    st.caption("The only evidence the speech may use. Word, PDF, txt or md.")
-    uploads = st.file_uploader("Upload files", type=["docx", "pdf", "txt", "md"], accept_multiple_files=True)
+    side = st.radio(
+        "I am the", ["aff", "neg"], index=0 if rnd.get("side", "aff") == "aff" else 1,
+        format_func=lambda s: fmt.side_labels[s], horizontal=True,
+    )
+    rnd["side"] = side
 
-    st.header("3. The flow")
-    mode = st.radio("Get the flow from", ["Flexcel .json (Ctrl+S in Flexcel)", "Screenshot upload", "Capture my screen"], index=0)
+    fmt_choice = st.selectbox(
+        "Format", ["ld", "policy", "pf"], index=["ld", "policy", "pf"].index(rnd.get("format", "ld")),
+        format_func=lambda k: {"ld": "Lincoln-Douglas", "policy": "Policy", "pf": "Public Forum"}[k],
+    )
+    first_speaker = rnd.get("first_speaker", "pro")
+    if fmt_choice == "pf":
+        first_speaker = st.radio("Who speaks first?", ["pro", "con"], index=0 if first_speaker == "pro" else 1, horizontal=True)
+    if fmt_choice != rnd.get("format") or first_speaker != rnd.get("first_speaker"):
+        if st.button("Switch format (starts a new round)", use_container_width=True):
+            st.session_state["round"] = store.new_round(fmt_choice, first_speaker)
+            st.session_state["round"]["side"] = side
+            store.save_round(st.session_state["round"])
+            bump_grids()
+            st.rerun()
 
-# --------------------------------------------------------------------------- flow input
-col_in, col_flow = st.columns([1, 1.4])
+    wpm = st.slider("Speaking rate (wpm)", 120, 350, cc.DEFAULT_WPM, 10)
 
-with col_in:
-    if mode.startswith("Flexcel"):
-        f = st.file_uploader("Flexcel save file", type=["json"], key="flowjson")
-        if f is not None:
+    st.divider()
+    rnd["name"] = st.text_input("Round name", rnd.get("name", ""))
+    if st.button("New round (clears the flow)", use_container_width=True):
+        st.session_state["round"] = store.new_round(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
+        st.session_state["round"]["side"] = side
+        store.save_round(st.session_state["round"])
+        bump_grids()
+        st.rerun()
+
+    n_files = len(mats.get("files", []))
+    n_words = len(mats.get("pasted", "").split()) + sum(len(f["text"].split()) for f in mats.get("files", []))
+    if n_words:
+        st.success(f"Case loaded: {n_files} file(s), {n_words:,} words")
+    else:
+        st.warning("No case loaded yet. Open the Case & Blocks tab.")
+
+# --------------------------------------------------------------------------- tabs
+tab_flow, tab_speech, tab_case = st.tabs(["Flow", "Speech", "Case & Blocks"])
+
+# ------------------------------------------------------------------ FLOW TAB
+with tab_flow:
+    sheet_names = [s["name"] for s in rnd["sheets"]]
+    sub = st.tabs(sheet_names + ["Cross-ex", "Notes", "Sheets & import"])
+    v = st.session_state["grid_version"]
+
+    for i, (tab, sheet) in enumerate(zip(sub, rnd["sheets"])):
+        with tab:
+            cols = sheet["columns"]
+            # The editor keeps its own diff on top of the frame we pass in, so pass the SAME
+            # base frame every rerun (snapshotted per grid version) and treat its output as truth.
+            base_key = f"base_{v}_{i}"
+            if base_key not in st.session_state:
+                st.session_state[base_key] = pd.DataFrame(sheet["rows"], columns=cols).astype(str)
+            edited = st.data_editor(
+                st.session_state[base_key],
+                key=f"grid_{v}_{i}",
+                num_rows="dynamic",
+                use_container_width=True,
+                height=560,
+                column_config={c: st.column_config.TextColumn(c, width="large") for c in cols},
+            )
+            rows = edited.fillna("").astype(str).values.tolist()
+            if rows != sheet["rows"]:
+                sheet["rows"] = rows
+            st.caption("Click a cell and type. Enter moves down, Tab moves right. Rows are argument threads: the first column is the argument, the columns to its right are the answers to it.")
+
+    with sub[len(sheet_names)]:
+        c1, c2 = st.columns(2)
+        with c1:
+            rnd["cx"]["ask"] = st.text_area("Questions I want to ask", rnd["cx"].get("ask", ""), height=420,
+                                            placeholder="One per line. The speech writer sees these.")
+        with c2:
+            rnd["cx"]["answers"] = st.text_area("What they said in cross-ex", rnd["cx"].get("answers", ""), height=420,
+                                                placeholder="Concessions, clarifications, anything you want used in the speech.")
+
+    with sub[len(sheet_names) + 1]:
+        rnd["notes"] = st.text_area("Notes for this round", rnd.get("notes", ""), height=420,
+                                    placeholder="Judge paradigm, what to collapse to, anything else.")
+
+    with sub[len(sheet_names) + 2]:
+        st.subheader("Add a sheet")
+        st.caption("For an off-case position, a second advantage, a theory shell, etc.")
+        new_name = st.text_input("Sheet name", placeholder="e.g. Kant NC, Theory, Plan")
+        base = st.selectbox("Columns like", [s["name"] for s in rnd["sheets"]])
+        if st.button("Add sheet") and new_name.strip():
+            template = next(s for s in rnd["sheets"] if s["name"] == base)
+            rnd["sheets"].append({"name": new_name.strip(), "columns": list(template["columns"]),
+                                  "rows": [[""] * len(template["columns"]) for _ in range(store.DEFAULT_ROWS)]})
+            store.save_round(rnd)
+            bump_grids()
+            st.rerun()
+        if len(rnd["sheets"]) > 1:
+            victim = st.selectbox("Remove a sheet", ["(none)"] + [s["name"] for s in rnd["sheets"]])
+            if victim != "(none)" and st.button(f"Remove '{victim}'"):
+                rnd["sheets"] = [s for s in rnd["sheets"] if s["name"] != victim]
+                store.save_round(rnd)
+                bump_grids()
+                st.rerun()
+
+        st.divider()
+        st.subheader("Import a Flexcel save")
+        fx = st.file_uploader("Flexcel .json", type=["json"], key="flexcel_import")
+        if fx is not None and st.button("Replace my flow with this file"):
+            import json as _json
             try:
-                st.session_state.flow = parse_flexcel(json.load(f))
-                st.success(f"Loaded {st.session_state.flow.flow_type} with {len(st.session_state.flow.sheets)} sheet(s).")
+                flow = parse_flexcel(_json.load(fx))
+                rnd["sheets"] = store.sheets_from_flow(flow)
+                rnd["format"] = flow.format.key
+                rnd["first_speaker"] = flow.first_speaker
+                store.save_round(rnd)
+                bump_grids()
+                st.rerun()
             except Exception as e:  # noqa: BLE001
                 st.error(f"Could not read that file: {e}")
 
-    elif mode.startswith("Screenshot"):
-        img = st.file_uploader("Screenshot of Flexcel", type=["png", "jpg", "jpeg", "webp"], key="flowimg")
-        if img is not None:
-            st.image(img, caption="Uploaded flow", use_container_width=True)
-            if st.button("Transcribe with Claude", type="primary"):
-                suffix = Path(img.name).suffix or ".png"
-                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                    tmp.write(img.getvalue())
-                    tmp_path = tmp.name
-                with st.spinner("Reading the flow..."):
-                    try:
-                        st.session_state.flow = cc.transcribe_flow_image(tmp_path)
-                        st.success("Flow transcribed. Check it on the right before generating.")
-                    except Exception as e:  # noqa: BLE001
-                        st.error(f"Transcription failed: {e}")
-
-    else:
-        mons = []
-        try:
-            mons = list_monitors()
-        except Exception as e:  # noqa: BLE001
-            st.error(f"Screen capture is unavailable here: {e}")
-        if mons:
-            choice = st.selectbox("Monitor", list(range(1, len(mons))) or [1], format_func=lambda i: f"Monitor {i} ({mons[i]['width']}x{mons[i]['height']})")
-            st.caption("Put Flexcel on that monitor with the sheet you want visible, then click.")
-            if st.button("Capture + transcribe", type="primary"):
-                shot = capture_screen("captures/flow.png", choice)
-                st.image(str(shot), caption="Captured", use_container_width=True)
-                with st.spinner("Reading the flow..."):
-                    try:
-                        st.session_state.flow = cc.transcribe_flow_image(shot)
-                        st.success("Flow transcribed. Check it on the right before generating.")
-                    except Exception as e:  # noqa: BLE001
-                        st.error(f"Transcription failed: {e}")
-
-with col_flow:
-    flow: Flow | None = st.session_state.flow
-    if flow is None:
-        st.info("Load a flow to continue.")
-    else:
-        fmt = flow.format
-        st.subheader(f"{fmt.label} flow")
-        tabs = st.tabs([s.name for s in flow.sheets] or ["(no sheets)"])
-        for tab, sheet in zip(tabs, flow.sheets):
-            with tab:
-                rows = [r for r in sheet.rows if any(c.strip() for c in r)]
-                if rows:
-                    st.dataframe([dict(zip(sheet.columns, r)) for r in rows], use_container_width=True, hide_index=True)
-                else:
-                    st.caption("Empty sheet")
-
-# --------------------------------------------------------------------------- generate
-st.divider()
-flow = st.session_state.flow
-if flow is not None:
-    fmt = flow.format
+# ------------------------------------------------------------------ SPEECH TAB
+with tab_speech:
+    flow = store.round_to_flow(rnd)
     mine = [s.name for s in fmt.speeches_for(side)]
     suggested = next_speech(flow, side)
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        speech = st.selectbox("Speech to write", mine, index=mine.index(suggested) if suggested in mine else 0,
-                              help="Auto-picked from what's already on the flow. Override if you want.")
+
+    top1, top2, top3 = st.columns([1, 2, 1])
+    with top1:
+        speech = st.selectbox("Speech", mine, index=mine.index(suggested) if suggested in mine else 0)
         sp = fmt.speech(speech)
-        st.caption(f"{sp.minutes:g} min ≈ {int(sp.minutes * wpm)} words at {wpm} wpm")
-    with c2:
-        extra = st.text_area("Extra instructions (optional)", placeholder="e.g. Go for the framework + contention 1 only. Kick the theory shell.", height=90)
+        st.caption(f"{sp.minutes:g} min ≈ {int(sp.minutes * wpm)} words")
+    with top2:
+        extra = st.text_input("Instructions (optional)", placeholder="e.g. collapse to framework + C1, kick theory")
+    with top3:
+        st.write("")
+        st.write("")
+        go = st.button(f"Write my {speech}", type="primary", use_container_width=True)
 
-    materials = []
-    for u in uploads or []:
-        try:
-            materials.append((u.name, read_material_bytes(u.name, u.getvalue())))
-        except Exception as e:  # noqa: BLE001
-            st.warning(f"Skipped {u.name}: {e}")
-    if not materials:
-        st.warning("No case/blocks uploaded. The speech will be purely analytic (no cards).")
+    if flow.is_empty() and speech not in (fmt.order()[0], fmt.order()[1]):
+        st.warning("The flow is empty. Fill in the Flow tab first, or the speech will have nothing to answer.")
 
-    if st.button(f"Write my {speech}", type="primary", use_container_width=True):
+    materials_pairs = []
+    if mats.get("pasted", "").strip():
+        materials_pairs.append(("pasted case and blocks", mats["pasted"]))
+    materials_pairs += [(f["name"], f["text"]) for f in mats.get("files", [])]
+
+    if go:
+        store.save_round(rnd)
         box = st.empty()
         buf: list[str] = []
 
@@ -138,29 +199,86 @@ if flow is not None:
 
         try:
             with st.spinner("Writing..."):
-                st.session_state.result = cc.generate_speech(
-                    flow, side, speech, bundle_materials(materials), wpm=wpm,
-                    extra_instructions=extra, on_text=on_text,
+                res = cc.generate_speech(
+                    flow, side, speech, bundle_materials(materials_pairs), wpm=wpm,
+                    extra_instructions=extra, on_text=on_text, round_context=store.round_context(rnd),
                 )
             box.empty()
+            entry = {
+                "speech": res.speech.name, "side": side, "text": res.text, "notes": res.notes,
+                "words": res.word_count, "target": res.word_target,
+                "at": datetime.now().isoformat(timespec="minutes"),
+                "model": res.model, "fallback": res.served_by_fallback,
+            }
+            # Replace an earlier draft of the same speech; keep the newest at the top.
+            rnd["speeches"] = [s for s in rnd["speeches"] if s["speech"] != res.speech.name]
+            rnd["speeches"].insert(0, entry)
+            store.save_round(rnd)
+            st.rerun()
         except Exception as e:  # noqa: BLE001
-            st.session_state.result = None
             st.error(f"Generation failed: {e}")
 
-    res = st.session_state.result
-    if res is not None and res.speech.name == speech:
-        over = res.word_count > res.word_target * 1.1
-        st.metric("Words", res.word_count, delta=f"target {res.word_target}", delta_color="inverse" if over else "off")
-        if res.served_by_fallback:
-            st.info(f"Served by fallback model {res.model}.")
-        st.markdown(res.text)
-        if res.notes:
-            with st.expander("Coach notes"):
-                st.markdown(res.notes)
+    # The speech doc: newest speech open, earlier ones collapsed below it.
+    if not rnd["speeches"]:
+        st.info("Your speech will appear here. Flow the round, then click Write.")
+    for n, spch in enumerate(rnd["speeches"]):
+        with st.expander(f"{spch['speech']} — {spch['words']} words (target {spch['target']}) — {spch['at']}", expanded=(n == 0)):
+            if spch.get("fallback"):
+                st.caption(f"Served by fallback model {spch.get('model')}")
+            edited = st.text_area("Speech (edit freely, this is what you read)", spch["text"], height=520, key=f"speech_{spch['speech']}_{spch['at']}")
+            if edited != spch["text"]:
+                spch["text"] = edited
+                spch["words"] = len(edited.split())
+                store.save_round(rnd)
+            if spch.get("notes"):
+                with st.expander("Coach notes: coverage, missing cards, risks"):
+                    st.markdown(spch["notes"])
+            out = store.SPEECH_DIR / f"{rnd['name']}".replace("/", "-")
+            out = out / f"{spch['speech'].replace('/', '-')}_{spch['side']}.docx"
+            write_speech_docx(out, spch["speech"], fmt.side_labels[spch["side"]], spch["text"], spch.get("notes"),
+                              word_count=spch["words"], minutes=fmt.speech(spch["speech"]).minutes)
+            st.download_button("Download as Word", data=out.read_bytes(), file_name=out.name,
+                               mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                               key=f"dl_{spch['speech']}_{spch['at']}")
 
-        out = Path(tempfile.gettempdir()) / f"{speech.replace('/', '-')}_{side}.docx"
-        write_speech_docx(out, res.speech.name, fmt.side_labels[side], res.text, res.notes,
-                          word_count=res.word_count, minutes=res.speech.minutes)
-        st.download_button("Download Word doc", data=out.read_bytes(), file_name=out.name,
-                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                           use_container_width=True)
+# ------------------------------------------------------------------ CASE TAB
+with tab_case:
+    st.caption("Load this once. It stays saved on this computer until you change it. "
+               "The speech writer may only quote what is here.")
+    c1, c2 = st.columns([1.4, 1])
+    with c1:
+        pasted = st.text_area(
+            "Paste your case, blocks and cards", mats.get("pasted", ""), height=560,
+            placeholder="Open your case in Google Docs or Word, select all (Ctrl+A), copy (Ctrl+C), paste here (Ctrl+V). "
+                        "Paste more files below it; headings help the writer find blocks.",
+        )
+        if pasted != mats.get("pasted", ""):
+            mats["pasted"] = pasted
+            store.save_materials(mats)
+    with c2:
+        st.subheader("Or upload files")
+        ups = st.file_uploader("Word, PDF, txt, md", type=["docx", "pdf", "txt", "md"], accept_multiple_files=True)
+        if ups and st.button("Add these files"):
+            known = {f["name"] for f in mats["files"]}
+            for u in ups:
+                try:
+                    text = read_material_bytes(u.name, u.getvalue())
+                except Exception as e:  # noqa: BLE001
+                    st.warning(f"Skipped {u.name}: {e}")
+                    continue
+                mats["files"] = [f for f in mats["files"] if f["name"] != u.name]
+                mats["files"].append({"name": u.name, "text": text})
+            store.save_materials(mats)
+            st.rerun()
+        if mats["files"]:
+            st.subheader("Loaded files")
+            for f in list(mats["files"]):
+                a, b = st.columns([3, 1])
+                a.write(f"**{f['name']}** · {len(f['text'].split()):,} words")
+                if b.button("Remove", key=f"rm_{f['name']}"):
+                    mats["files"] = [x for x in mats["files"] if x["name"] != f["name"]]
+                    store.save_materials(mats)
+                    st.rerun()
+
+# --------------------------------------------------------------------------- autosave
+store.save_round(rnd)
