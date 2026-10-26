@@ -133,3 +133,54 @@ def sheets_from_flow(flow: Flow) -> list[dict]:
         rows += _blank_rows(len(s.columns), max(10, DEFAULT_ROWS - len(rows)))
         out.append({"name": s.name, "columns": list(s.columns), "rows": rows})
     return out
+
+
+# ---------------------------------------------------------------------------
+# Demo round for testing (matches examples/sample_case.md)
+# ---------------------------------------------------------------------------
+
+def demo_round() -> dict:
+    """An LD round, flowed through the 1NC, from the Aff's seat. For trying the app."""
+    rnd = new_round("ld", name="Demo round (aff)")
+    rnd["side"] = "aff"
+    ac = rnd["sheets"][0]
+    nc = rnd["sheets"][1]
+    ac_rows = [
+        ["FW: V morality / VC minimizing structural violence (Galtung 69). State monopolizes force -> owes basic needs",
+         "FW: util / weigh consequences. SV is non-falsifiable, everything is 'structural'; prefer clear impact calc", "", "", ""],
+        ["C1: homelessness kills - 3.5x mortality, ~20k deaths/yr (Rivera 24)",
+         "Rivera is correlation - alt causes: addiction + mental illness, housing doesn't fix", "", "", ""],
+        ["Solvency: Finland Housing First cut long-term homelessness 70% (Pleace 22)",
+         "No solvency - US has no units; a right w/o supply = paper right. Finland is 5M ppl, not comparable", "", "", ""],
+        ["C2: stability -> education (+0.3 SD) + 26% employment (Okafor 23)",
+         "Non-unique - vouchers + Section 8 already exist. Turn: housing mandates = rent control -> cuts supply 15% (Diamond 19)", "", "", ""],
+        ["Cost offense: PSH 20k vs 35-45k street costs (Culhane 20)",
+         "Cost: 100B/yr -> tradeoff w/ Medicaid + SNAP, hurts same ppl", "", "", ""],
+    ]
+    nc_rows = [
+        ["NC FW: V justice / VC consistency w/ property rights (Nozick). Taxation for housing = forced labor", "", "", ""],
+        ["NC C1: positive rights are incoherent - a right to a good = a claim on someone else's labor; only negative rights are real rights", "", "", ""],
+        ["NC C2: federal guarantee crowds out local solutions - HUD track record, one-size-fits-all (Husock 21)", "", "", ""],
+        ["Underview: judge should presume neg on vague plans - 'guarantee' has no mechanism", "", "", ""],
+    ]
+    for i, r in enumerate(ac_rows):
+        ac["rows"][i] = r
+    for i, r in enumerate(nc_rows):
+        nc["rows"][i] = r
+    rnd["cx"]["ask"] = (
+        "Does a right to a fair trial require public spending? Is that incoherent?\n"
+        "Does your property-rights framework say anything about what a homeless person is owed?\n"
+        "Is the Diamond card about rent control or about a government housing guarantee?"
+    )
+    rnd["cx"]["answers"] = (
+        "Conceded the fair trial example requires spending but said it's 'different'.\n"
+        "Said Nozick framework owes the homeless 'nothing beyond non-interference'.\n"
+        "Admitted Diamond 19 studies San Francisco rent control, said it 'still applies'."
+    )
+    rnd["notes"] = "Judge: flay-ish, likes clear weighing and extensions. Collapse to FW + C1 + solvency in the 2AR."
+    return rnd
+
+
+def demo_case_text() -> str:
+    path = Path(__file__).resolve().parent.parent / "examples" / "sample_case.md"
+    return path.read_text(encoding="utf-8") if path.exists() else ""

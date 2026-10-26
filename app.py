@@ -16,6 +16,7 @@ from masterdebater import store
 from masterdebater.docx_out import write_speech_docx
 from masterdebater.flow import next_speech, parse_flexcel
 from masterdebater.materials import bundle_materials, read_material_bytes
+from masterdebater.updater import update_from_github
 
 st.set_page_config(page_title="MasterDebater", page_icon="🎤", layout="wide")
 
@@ -60,9 +61,6 @@ FOCUS_CSS = """
 # --------------------------------------------------------------------------- sidebar
 if focus is None:
     with st.sidebar:
-        st.title("MasterDebater")
-        st.caption(f"Model `{cc.MODEL}`")
-
         side = st.radio(
             "I am the", ["aff", "neg"], index=0 if side == "aff" else 1,
             format_func=lambda s: fmt.side_labels[s], horizontal=True,
@@ -102,6 +100,20 @@ if focus is None:
             st.success(f"Case loaded: {n_files} file(s), {n_words:,} words")
         else:
             st.warning("No case loaded yet. Open the Case & Blocks tab.")
+
+        st.divider()
+        if st.button("Update MasterDebater", use_container_width=True,
+                     help="Download the newest version from GitHub. Your rounds and case are kept."):
+            try:
+                changed = update_from_github()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Update failed: {e}")
+            else:
+                if changed:
+                    st.success(f"Updated {len(changed)} file(s). Press Ctrl+C in the black window, "
+                               "then run `streamlit run app.py` again.")
+                else:
+                    st.info("Already up to date.")
 
 wpm: int = ss["wpm"]
 
@@ -191,6 +203,20 @@ def render_flow(full: bool) -> None:
                 st.rerun()
 
         st.divider()
+        st.subheader("Try it with a demo round")
+        st.caption("Loads a sample LD round from the Aff's seat, flowed through the 1NC, plus a sample case "
+                   "so you can click Write and see a 1AR. Replaces the current flow.")
+        if st.button("Load demo round"):
+            demo = store.demo_round()
+            ss["round"] = demo
+            store.save_round(demo)
+            if not mats.get("pasted", "").strip() and not mats.get("files"):
+                mats["pasted"] = store.demo_case_text()
+                store.save_materials(mats)
+            bump_grids()
+            st.rerun()
+
+        st.divider()
         st.subheader("Import a Flexcel save")
         fx = st.file_uploader("Flexcel .json", type=["json"], key="flexcel_import")
         if fx is not None and st.button("Replace my flow with this file"):
@@ -259,7 +285,12 @@ def render_speech(full: bool) -> None:
             store.save_round(rnd)
             st.rerun()
         except Exception as e:  # noqa: BLE001
-            st.error(f"Generation failed: {e}")
+            msg = str(e)
+            if "authentication" in msg.lower() or "api_key" in msg.lower():
+                st.error("No API key found. Close the app (Ctrl+C in the black window), then run "
+                         "`set ANTHROPIC_API_KEY=your-key` followed by `streamlit run app.py`.")
+            else:
+                st.error(f"Generation failed: {msg}")
 
     # The speech doc: newest speech open, earlier ones collapsed below it.
     if not rnd["speeches"]:
