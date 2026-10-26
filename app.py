@@ -318,8 +318,6 @@ def render_speech(full: bool) -> None:
 
 
 def render_case() -> None:
-    st.caption("Load this once. It stays saved on this computer until you change it. "
-               "The speech writer may only quote what is here.")
     c1, c2 = st.columns([1.4, 1])
     with c1:
         pasted = st.text_area(
