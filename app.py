@@ -50,6 +50,36 @@ def exit_focus() -> None:
     bump_grids()
 
 
+READING_CSS = """
+<style>
+.md-speech p { font-size: 1.2rem; line-height: 1.65; margin: 0 0 0.9rem 0; }
+.md-speech h2 { font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.6;
+                margin: 1.3rem 0 0.4rem 0; padding-bottom: 0.2rem; border-bottom: 1px solid rgba(128,128,128,0.35); }
+</style>
+"""
+
+
+def reading_html(text: str) -> str:
+    """Render the speech for reading: section labels small and grey, spoken text large."""
+    import html as _html
+    import re as _re
+
+    out = ['<div class="md-speech">']
+    for block in _re.split(r"\n\s*\n", text.strip()):
+        block = block.strip()
+        if not block:
+            continue
+        m = _re.match(r"^#{1,3}\s+(.*)$", block)
+        if m:
+            out.append(f"<h2>{_html.escape(m.group(1).strip())}</h2>")
+        else:
+            # Keep single line breaks inside a paragraph; strip stray markdown bullets/bold.
+            block = _re.sub(r"^\s*[-*]\s+", "", block, flags=_re.M).replace("**", "")
+            out.append("<p>" + _html.escape(block).replace("\n", "<br>") + "</p>")
+    out.append("</div>")
+    return "".join(out)
+
+
 FOCUS_CSS = """
 <style>
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"],
@@ -57,6 +87,8 @@ FOCUS_CSS = """
 .block-container { padding-top: 0.6rem !important; padding-bottom: 0 !important; max-width: 100% !important; }
 </style>
 """
+
+st.markdown(READING_CSS, unsafe_allow_html=True)
 
 # --------------------------------------------------------------------------- sidebar
 if focus is None:
@@ -76,7 +108,7 @@ if focus is None:
             first_speaker = st.radio("Who speaks first?", ["pro", "con"],
                                      index=0 if first_speaker == "pro" else 1, horizontal=True)
         if fmt_choice != rnd.get("format") or first_speaker != rnd.get("first_speaker"):
-            if st.button("Switch format (starts a new round)", use_container_width=True):
+            if st.button("Switch format (starts a new round)", width="stretch"):
                 ss["round"] = store.new_round(fmt_choice, first_speaker)
                 ss["round"]["side"] = side
                 store.save_round(ss["round"])
@@ -87,7 +119,7 @@ if focus is None:
 
         st.divider()
         rnd["name"] = st.text_input("Round name", rnd.get("name", ""))
-        if st.button("New round (clears the flow)", use_container_width=True):
+        if st.button("New round (clears the flow)", width="stretch"):
             ss["round"] = store.new_round(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
             ss["round"]["side"] = side
             store.save_round(ss["round"])
@@ -102,7 +134,7 @@ if focus is None:
             st.warning("No case loaded yet. Open the Case & Blocks tab.")
 
         st.divider()
-        if st.button("Update MasterDebater", use_container_width=True,
+        if st.button("Update MasterDebater", width="stretch",
                      help="Download the newest version from GitHub. Your rounds and case are kept."):
             try:
                 changed = update_from_github()
@@ -131,9 +163,9 @@ def focus_bar(view: str) -> None:
         )
     with right:
         c1, c2 = st.columns(2)
-        c1.button(f"→ {label[other]}", use_container_width=True, on_click=enter_focus, args=(other,),
+        c1.button(f"→ {label[other]}", width="stretch", on_click=enter_focus, args=(other,),
                   help=f"Switch the full-screen view to {label[other]}")
-        c2.button("✕ Exit", use_container_width=True, on_click=exit_focus, help="Back to the normal layout")
+        c2.button("✕ Exit", width="stretch", on_click=exit_focus, help="Back to the normal layout")
 
 
 def render_flow(full: bool) -> None:
@@ -154,7 +186,7 @@ def render_flow(full: bool) -> None:
                 ss[base_key],
                 key=f"grid_{v}_{i}",
                 num_rows="dynamic",
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 height=grid_height,
                 # A small base width per column: Streamlit spreads the leftover space evenly,
@@ -247,7 +279,7 @@ def render_speech(full: bool) -> None:
     with top3:
         st.write("")
         st.write("")
-        go = st.button(f"Write my {speech}", type="primary", use_container_width=True)
+        go = st.button(f"Write my {speech}", type="primary", width="stretch")
 
     if flow.is_empty() and speech not in (fmt.order()[0], fmt.order()[1]):
         st.warning("The flow is empty. Fill in the Flow tab first, or the speech will have nothing to answer.")
@@ -300,12 +332,18 @@ def render_speech(full: bool) -> None:
         with st.expander(title, expanded=(n == 0)):
             if spch.get("fallback"):
                 st.caption(f"Served by fallback model {spch.get('model')}")
-            edited = st.text_area("Speech (edit freely, this is what you read)", spch["text"],
-                                  height=(720 if full else 520), key=f"speech_{spch['speech']}_{spch['at']}")
-            if edited != spch["text"]:
-                spch["text"] = edited
-                spch["words"] = len(edited.split())
-                store.save_round(rnd)
+            editing = st.toggle("Edit", key=f"edit_{spch['speech']}_{spch['at']}",
+                                help="Switch between the reading view and an editable text box")
+            if editing:
+                edited = st.text_area("Speech text", spch["text"], height=(720 if full else 520),
+                                      key=f"speech_{spch['speech']}_{spch['at']}")
+                if edited != spch["text"]:
+                    spch["text"] = edited
+                    spch["words"] = len(edited.split())
+                    store.save_round(rnd)
+            else:
+                with st.container(border=True):
+                    st.markdown(reading_html(spch["text"]), unsafe_allow_html=True)
             if spch.get("notes"):
                 with st.expander("Coach notes: coverage, missing cards, risks"):
                     st.markdown(spch["notes"])
