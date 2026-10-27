@@ -26,7 +26,11 @@ ss.setdefault("round", store.load_round())
 ss.setdefault("materials", store.load_materials())
 ss.setdefault("grid_version", 0)
 ss.setdefault("wpm", cc.DEFAULT_WPM)
-ss.setdefault("focus", None)   # None | "flow" | "speech"  -> full-screen mode
+ss.setdefault("focus", None)   # None | "flow" | "speech" | "read"  -> full-screen mode
+ss.setdefault("read_speech", None)
+if "read" in st.query_params:          # a click on the speech text lands here
+    ss["focus"] = "read"
+    ss["read_speech"] = st.query_params["read"]
 
 rnd: dict = ss["round"]
 mats: dict = ss["materials"]
@@ -47,35 +51,58 @@ def enter_focus(view: str) -> None:
 
 def exit_focus() -> None:
     ss["focus"] = None
+    st.query_params.clear()
     bump_grids()
+
+
+def enter_read(speech_name: str) -> None:
+    ss["focus"] = "read"
+    ss["read_speech"] = speech_name
+    st.query_params["read"] = speech_name
+
+
+def toggle_labels() -> None:
+    rnd["show_labels"] = not rnd.get("show_labels", True)
+    store.save_round(rnd)
 
 
 READING_CSS = """
 <style>
 .md-speech p { font-size: 1.2rem; line-height: 1.65; margin: 0 0 0.9rem 0; }
+.md-speech.md-big p { font-size: 1.45rem; line-height: 1.7; margin-bottom: 1.1rem; }
+.md-speech a.md-link { color: inherit !important; text-decoration: none !important; display: block; cursor: pointer; }
 .md-speech h2 { font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.6;
                 margin: 1.3rem 0 0.4rem 0; padding-bottom: 0.2rem; border-bottom: 1px solid rgba(128,128,128,0.35); }
 </style>
 """
 
 
-def reading_html(text: str) -> str:
-    """Render the speech for reading: section labels small and grey, spoken text large."""
+def reading_html(text: str, labels: bool = True, big: bool = False, link: str | None = None) -> str:
+    """Render the speech for reading: section labels small and grey, spoken text large.
+
+    labels=False drops the section headings entirely. link wraps the whole thing in an
+    anchor so clicking the text opens read mode (?read=<speech>)."""
     import html as _html
     import re as _re
 
-    out = ['<div class="md-speech">']
+    cls = "md-speech md-big" if big else "md-speech"
+    out = [f'<div class="{cls}">']
+    if link:
+        out.append(f'<a class="md-link" href="{_html.escape(link)}" target="_self" title="Click to read full screen">')
     for block in _re.split(r"\n\s*\n", text.strip()):
         block = block.strip()
         if not block:
             continue
         m = _re.match(r"^#{1,3}\s+(.*)$", block)
         if m:
-            out.append(f"<h2>{_html.escape(m.group(1).strip())}</h2>")
+            if labels:
+                out.append(f"<h2>{_html.escape(m.group(1).strip())}</h2>")
         else:
             # Keep single line breaks inside a paragraph; strip stray markdown bullets/bold.
             block = _re.sub(r"^\s*[-*]\s+", "", block, flags=_re.M).replace("**", "")
             out.append("<p>" + _html.escape(block).replace("\n", "<br>") + "</p>")
+    if link:
+        out.append("</a>")
     out.append("</div>")
     return "".join(out)
 
@@ -330,7 +357,13 @@ def render_speech(full: bool) -> None:
         with st.expander(title, expanded=(n == 0)):
             if spch.get("fallback"):
                 st.caption(f"Served by fallback model {spch.get('model')}")
-            editing = st.toggle("Edit", key=f"edit_{spch['speech']}_{spch['at']}",
+            b1, b2, b3 = st.columns([1.2, 1.2, 4])
+            b1.button("⛶ Read full screen", key=f"read_{spch['speech']}_{spch['at']}",
+                      on_click=enter_read, args=(spch["speech"],), width="stretch")
+            b2.button("Labels: " + ("on" if rnd.get("show_labels", True) else "off"),
+                      key=f"lbl_{spch['speech']}_{spch['at']}", on_click=toggle_labels, width="stretch",
+                      help="Show or hide the ROADMAP / FRAMEWORK section labels")
+            editing = b3.toggle("Edit", key=f"edit_{spch['speech']}_{spch['at']}",
                                 help="Switch between the reading view and an editable text box")
             if editing:
                 edited = st.text_area("Speech text", spch["text"], height=(720 if full else 520),
@@ -341,7 +374,11 @@ def render_speech(full: bool) -> None:
                     store.save_round(rnd)
             else:
                 with st.container(border=True):
-                    st.markdown(reading_html(spch["text"]), unsafe_allow_html=True)
+                    st.markdown(
+                        reading_html(spch["text"], labels=rnd.get("show_labels", True),
+                                     link=f"?read={spch['speech']}"),
+                        unsafe_allow_html=True,
+                    )
             if spch.get("notes"):
                 with st.expander("Coach notes: coverage, missing cards, risks"):
                     st.markdown(spch["notes"])
@@ -351,6 +388,26 @@ def render_speech(full: bool) -> None:
             st.download_button("Download as Word", data=out.read_bytes(), file_name=out.name,
                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                key=f"dl_{spch['speech']}_{spch['at']}")
+
+
+def render_read() -> None:
+    """Full-screen read mode: nothing but the speech, big type."""
+    want = ss.get("read_speech")
+    spch = next((x for x in rnd["speeches"] if x["speech"] == want), None) or (rnd["speeches"][0] if rnd["speeches"] else None)
+    left, mid, right = st.columns([5, 1.3, 1])
+    with left:
+        if spch:
+            st.caption(f"**{spch['speech']}** · {fmt.side_labels[spch['side']]} · {spch['words']} words")
+    with mid:
+        st.button("Labels: " + ("on" if rnd.get("show_labels", True) else "off"), key="read_lbl",
+                  on_click=toggle_labels, width="stretch")
+    with right:
+        st.button("✕ Exit", key="read_exit", on_click=exit_focus, width="stretch")
+    if spch is None:
+        st.info("No speech yet. Exit and click Write.")
+        return
+    st.markdown(reading_html(spch["text"], labels=rnd.get("show_labels", True), big=True),
+                unsafe_allow_html=True)
 
 
 def render_case() -> None:
@@ -415,6 +472,9 @@ elif focus == "speech":
     st.markdown(FOCUS_CSS, unsafe_allow_html=True)
     focus_bar("speech")
     render_speech(full=True)
+elif focus == "read":
+    st.markdown(FOCUS_CSS, unsafe_allow_html=True)
+    render_read()
 else:
     tab_flow, tab_speech, tab_case = st.tabs(["Flow", "Speech", "Case & Blocks"])
     with tab_flow:
