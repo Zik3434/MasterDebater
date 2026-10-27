@@ -126,12 +126,11 @@ if focus is None:
             bump_grids()
             st.rerun()
 
-        n_files = len(mats.get("files", []))
-        n_words = len(mats.get("pasted", "").split()) + sum(len(f["text"].split()) for f in mats.get("files", []))
+        n_words = store.material_words(mats, side)
         if n_words:
-            st.success(f"Case loaded: {n_files} file(s), {n_words:,} words")
+            st.success(f"{fmt.side_labels[side]} material loaded: {n_words:,} words")
         else:
-            st.warning("No case loaded yet. Open the Case & Blocks tab.")
+            st.warning(f"No {fmt.side_labels[side]} case or blocks loaded. Open the Case & Blocks tab.")
 
         st.divider()
         if st.button("Update MasterDebater", width="stretch",
@@ -242,8 +241,8 @@ def render_flow(full: bool) -> None:
             demo = store.demo_round()
             ss["round"] = demo
             store.save_round(demo)
-            if not mats.get("pasted", "").strip() and not mats.get("files"):
-                mats["pasted"] = store.demo_case_text()
+            if not store.materials_for_side(mats, "aff"):
+                mats["sections"]["aff_case"] = store.demo_case_text()
                 store.save_materials(mats)
             bump_grids()
             st.rerun()
@@ -284,10 +283,9 @@ def render_speech(full: bool) -> None:
     if flow.is_empty() and speech not in (fmt.order()[0], fmt.order()[1]):
         st.warning("The flow is empty. Fill in the Flow tab first, or the speech will have nothing to answer.")
 
-    materials_pairs = []
-    if mats.get("pasted", "").strip():
-        materials_pairs.append(("pasted case and blocks", mats["pasted"]))
-    materials_pairs += [(f["name"], f["text"]) for f in mats.get("files", [])]
+    materials_pairs = store.materials_for_side(mats, side)
+    if not materials_pairs:
+        st.warning(f"No {fmt.side_labels[side]} case or blocks are loaded, so the speech will be all analytics.")
 
     if go:
         store.save_round(rnd)
@@ -356,18 +354,33 @@ def render_speech(full: bool) -> None:
 
 
 def render_case() -> None:
-    c1, c2 = st.columns([1.4, 1])
-    with c1:
-        pasted = st.text_area(
-            "Paste your case, blocks and cards", mats.get("pasted", ""), height=560,
-            placeholder="Open your case in Google Docs or Word, select all (Ctrl+A), copy (Ctrl+C), paste here "
-                        "(Ctrl+V). Paste more files below it; headings help the writer find blocks.",
-        )
-        if pasted != mats.get("pasted", ""):
-            mats["pasted"] = pasted
+    st.caption("Only the material for the side you're on is sent to the writer. Aff speeches never see Neg "
+               "material and vice versa. Everything here stays saved on this computer.")
+
+    def box(key: str, height: int) -> None:
+        val = st.text_area(store.SECTIONS[key], mats["sections"].get(key, ""), height=height, key=f"mat_{key}",
+                           placeholder="Open it in Google Docs or Word, Ctrl+A, Ctrl+C, then Ctrl+V here.")
+        if val != mats["sections"].get(key, ""):
+            mats["sections"][key] = val
             store.save_materials(mats)
-    with c2:
+
+    aff_col, neg_col = st.columns(2)
+    with aff_col:
+        st.subheader("Affirmative")
+        box("aff_case", 260)
+        box("aff_blocks", 260)
+    with neg_col:
+        st.subheader("Negative")
+        box("neg_case", 260)
+        box("neg_blocks", 260)
+    box("shared", 180)
+
+    st.divider()
+    u1, u2 = st.columns([1.4, 1])
+    with u1:
         st.subheader("Or upload files")
+        up_side = st.radio("These files are for", ["aff", "neg", "both"], horizontal=True,
+                           format_func=lambda k: {"aff": "Aff", "neg": "Neg", "both": "Both sides"}[k])
         ups = st.file_uploader("Word, PDF, txt, md", type=["docx", "pdf", "txt", "md"], accept_multiple_files=True)
         if ups and st.button("Add these files"):
             for u in ups:
@@ -377,14 +390,16 @@ def render_case() -> None:
                     st.warning(f"Skipped {u.name}: {e}")
                     continue
                 mats["files"] = [f for f in mats["files"] if f["name"] != u.name]
-                mats["files"].append({"name": u.name, "text": text})
+                mats["files"].append({"name": u.name, "text": text, "side": up_side})
             store.save_materials(mats)
             st.rerun()
+    with u2:
         if mats["files"]:
             st.subheader("Loaded files")
             for f in list(mats["files"]):
                 a, b = st.columns([3, 1])
-                a.write(f"**{f['name']}** · {len(f['text'].split()):,} words")
+                tag = {"aff": "Aff", "neg": "Neg", "both": "Both"}.get(f.get("side", "both"), "Both")
+                a.write(f"**{f['name']}** · {tag} · {len(f['text'].split()):,} words")
                 if b.button("Remove", key=f"rm_{f['name']}"):
                     mats["files"] = [x for x in mats["files"] if x["name"] != f["name"]]
                     store.save_materials(mats)

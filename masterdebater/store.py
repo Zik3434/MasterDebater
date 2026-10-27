@@ -85,13 +85,58 @@ def save_round(rnd: dict) -> None:
     ROUND_FILE.write_text(json.dumps(rnd, indent=1), encoding="utf-8")
 
 
+SECTIONS = {
+    "aff_case": "Aff case (1AC)",
+    "aff_blocks": "Aff blocks (1AR / 2AR answers)",
+    "neg_case": "Neg case (1NC / NC)",
+    "neg_blocks": "Neg blocks (2NR answers)",
+    "shared": "Both sides (frameworks, generic cards, theory)",
+}
+SIDE_SECTIONS = {
+    "aff": ["aff_case", "aff_blocks", "shared"],
+    "neg": ["neg_case", "neg_blocks", "shared"],
+}
+
+
+def empty_materials() -> dict:
+    # sections: {key: text}; files: [{"name", "text", "side": "aff"|"neg"|"both"}]
+    return {"sections": {k: "" for k in SECTIONS}, "files": []}
+
+
 def load_materials() -> dict:
+    m = empty_materials()
     if MATERIALS_FILE.exists():
         try:
-            return json.loads(MATERIALS_FILE.read_text(encoding="utf-8"))
+            raw = json.loads(MATERIALS_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            pass
-    return {"pasted": "", "files": []}   # files: [{"name": ..., "text": ...}]
+            raw = {}
+        # Older saves had one "pasted" box; keep that text as shared material.
+        if raw.get("pasted", "").strip():
+            m["sections"]["shared"] = raw["pasted"]
+        for k, v in (raw.get("sections") or {}).items():
+            if k in m["sections"]:
+                m["sections"][k] = v or ""
+        for f in raw.get("files") or []:
+            m["files"].append({"name": f["name"], "text": f.get("text", ""), "side": f.get("side", "both")})
+    return m
+
+
+def materials_for_side(m: dict, side: str) -> list[tuple[str, str]]:
+    """(label, text) pairs the writer may use for this side: that side's sections, shared
+    material, and uploaded files tagged with that side or 'both'. Nothing from the other side."""
+    pairs = []
+    for key in SIDE_SECTIONS[side]:
+        text = m["sections"].get(key, "")
+        if text.strip():
+            pairs.append((SECTIONS[key], text))
+    for f in m["files"]:
+        if f.get("side", "both") in (side, "both") and f.get("text", "").strip():
+            pairs.append((f["name"], f["text"]))
+    return pairs
+
+
+def material_words(m: dict, side: str) -> int:
+    return sum(len(t.split()) for _, t in materials_for_side(m, side))
 
 
 def save_materials(m: dict) -> None:
