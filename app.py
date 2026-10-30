@@ -196,7 +196,7 @@ def focus_bar(view: str) -> None:
 
 def render_flow(full: bool) -> None:
     sheet_names = [s["name"] for s in rnd["sheets"]]
-    sub = st.tabs(sheet_names + ["Cross-ex", "Notes", "Sheets & import"])
+    sub = st.tabs(sheet_names + ["Sheets & import"])
     v = ss["grid_version"]
     grid_height = 760 if full else 560
 
@@ -227,20 +227,6 @@ def render_flow(full: bool) -> None:
                            "threads: the first column is the argument, the columns to its right answer it.")
 
     with sub[len(sheet_names)]:
-        c1, c2 = st.columns(2)
-        h = 640 if full else 420
-        with c1:
-            rnd["cx"]["ask"] = st.text_area("Questions I want to ask", rnd["cx"].get("ask", ""), height=h,
-                                            placeholder="One per line. The speech writer sees these.")
-        with c2:
-            rnd["cx"]["answers"] = st.text_area("What they said in cross-ex", rnd["cx"].get("answers", ""), height=h,
-                                                placeholder="Concessions, clarifications, anything to use in the speech.")
-
-    with sub[len(sheet_names) + 1]:
-        rnd["notes"] = st.text_area("Notes for this round", rnd.get("notes", ""), height=640 if full else 420,
-                                    placeholder="Judge paradigm, what to collapse to, anything else.")
-
-    with sub[len(sheet_names) + 2]:
         st.subheader("Add a sheet")
         st.caption("For an off-case position, a second advantage, a theory shell, etc.")
         new_name = st.text_input("Sheet name", placeholder="e.g. Kant NC, Theory, Plan")
@@ -288,6 +274,30 @@ def render_flow(full: bool) -> None:
                 st.rerun()
             except Exception as e:  # noqa: BLE001
                 st.error(f"Could not read that file: {e}")
+
+
+def render_cx() -> None:
+    """Cross-ex answers and round notes. Everything here goes to the speech writer."""
+    st.caption("Everything on this tab is handed to the speech writer along with the flow. "
+               "Concessions, admissions and clarifications from cross-ex are the most valuable thing you can put here.")
+    c1, c2 = st.columns([1.4, 1])
+    with c1:
+        rnd["cx"]["answers"] = st.text_area(
+            "What they said in cross-ex", rnd["cx"].get("answers", ""), height=420,
+            placeholder="One per line, in your own words.\n"
+                        "e.g. Conceded their framework has no answer to structural violence.\n"
+                        "e.g. Said their Diamond card is about rent control, not a housing guarantee.\n"
+                        "e.g. Could not name a single enforcement mechanism for the plan.",
+        )
+    with c2:
+        rnd["cx"]["ask"] = st.text_area(
+            "Questions I want to ask", rnd["cx"].get("ask", ""), height=420,
+            placeholder="Your prep for cross-ex. The writer sees these too.",
+        )
+    rnd["notes"] = st.text_area(
+        "Round notes", rnd.get("notes", ""), height=160,
+        placeholder="Judge paradigm, what to collapse to, anything else the writer should know.",
+    )
 
 
 def render_speech(full: bool) -> None:
@@ -476,11 +486,13 @@ elif focus == "read":
     st.markdown(FOCUS_CSS, unsafe_allow_html=True)
     render_read()
 else:
-    tab_flow, tab_speech, tab_case = st.tabs(["Flow", "Speech", "Case & Blocks"])
+    tab_flow, tab_cx, tab_speech, tab_case = st.tabs(["Flow", "Cross-ex", "Speech", "Case & Blocks"])
     with tab_flow:
         st.button("⛶ Full screen", key="fs_flow", on_click=enter_focus, args=("flow",),
                   help="Hide the sidebar and tabs so the flow fills the window")
         render_flow(full=False)
+    with tab_cx:
+        render_cx()
     with tab_speech:
         st.button("⛶ Full screen", key="fs_speech", on_click=enter_focus, args=("speech",),
                   help="Hide the sidebar and tabs so the speech fills the window")
