@@ -50,6 +50,10 @@ export ANTHROPIC_API_KEY=sk-ant-...     # macOS/Linux
 
 ## Run the app
 
+On Windows, double-click `start.bat`. The first time it installs everything and asks for your API key, which it saves in `data\apikey.txt` (never uploaded). After that it just opens the app.
+
+Or from a terminal:
+
 ```bash
 streamlit run app.py
 ```
