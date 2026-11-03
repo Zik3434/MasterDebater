@@ -177,6 +177,7 @@ def build_speech_prompt(
     wpm: int,
     extra_instructions: str = "",
     round_context: str = "",
+    resolution: str = "",
 ) -> str:
     side_label = fmt.side_labels[side]
     opp_label = fmt.side_labels["neg" if side == "aff" else "aff"]
@@ -184,7 +185,12 @@ def build_speech_prompt(
     done = ", ".join(flow.speeches_with_content()) or "(nothing flowed yet)"
     target = _word_target(speech, wpm)
 
-    parts = [
+    parts = []
+    if resolution.strip():
+        parts.append(
+            f"RESOLUTION (exact wording; use it for burdens, definitions and topicality): {resolution.strip()}"
+        )
+    parts += [
         f"FORMAT: {fmt.label}. Speech order: {order}.",
         f"I am the {side_label}. My opponent is the {opp_label}.",
         f"SPEECH TO WRITE: {speech.name} ({speech.minutes:g} minutes). "
@@ -239,6 +245,7 @@ def generate_speech(
     client: anthropic.Anthropic | None = None,
     on_text=None,
     round_context: str = "",
+    resolution: str = "",
 ) -> SpeechResult:
     """Write the requested speech. `on_text(chunk)` receives streamed text if given."""
     client = client or make_client()
@@ -248,7 +255,7 @@ def generate_speech(
         raise ValueError(f"{speech_name} belongs to the {fmt.side_labels[speech.side]}, not the {fmt.side_labels[side]}")
 
     prompt = build_speech_prompt(
-        flow, fmt, speech, side, materials_text, wpm, extra_instructions, round_context
+        flow, fmt, speech, side, materials_text, wpm, extra_instructions, round_context, resolution
     )
 
     with client.beta.messages.stream(

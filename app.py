@@ -338,6 +338,7 @@ def render_speech(full: bool) -> None:
                 res = cc.generate_speech(
                     flow, side, speech, bundle_materials(materials_pairs), wpm=wpm,
                     extra_instructions=extra, on_text=on_text, round_context=store.round_context(rnd),
+                    resolution=mats.get("resolution", ""),
                 )
             box.empty()
             entry = {
@@ -421,6 +422,14 @@ def render_read() -> None:
 
 
 def render_case() -> None:
+    res = st.text_input(
+        "Resolution", mats.get("resolution", ""),
+        placeholder="Paste the exact wording, e.g. Resolved: The United States ought to ...",
+        help="Sent with every speech, Aff and Neg. Stays saved across rounds until you change it.",
+    )
+    if res != mats.get("resolution", ""):
+        mats["resolution"] = res
+        store.save_materials(mats)
     st.caption("Only the material for the side you're on is sent to the writer. Aff speeches never see Neg "
                "material and vice versa. Everything here stays saved on this computer.")
 

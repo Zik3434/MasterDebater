@@ -100,7 +100,7 @@ SIDE_SECTIONS = {
 
 def empty_materials() -> dict:
     # sections: {key: text}; files: [{"name", "text", "side": "aff"|"neg"|"both"}]
-    return {"sections": {k: "" for k in SECTIONS}, "files": []}
+    return {"resolution": "", "sections": {k: "" for k in SECTIONS}, "files": []}
 
 
 def load_materials() -> dict:
@@ -113,6 +113,7 @@ def load_materials() -> dict:
         # Older saves had one "pasted" box; keep that text as shared material.
         if raw.get("pasted", "").strip():
             m["sections"]["shared"] = raw["pasted"]
+        m["resolution"] = raw.get("resolution", "") or ""
         for k, v in (raw.get("sections") or {}).items():
             if k in m["sections"]:
                 m["sections"][k] = v or ""
