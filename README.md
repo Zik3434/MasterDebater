@@ -28,6 +28,11 @@ Everything happens inside one window with three tabs:
   sources the speech may quote. The writer is told to never invent a card, author, statistic
   or year.
 
+* **Pre-flow.** The first time a side's case is loaded, the app drafts a pre-flow from it (one flow
+  line per argument) and saves it. On every fresh round, picking that side drops the pre-flow into
+  column 1 of your own sheet, so the opponent's answers line up against your arguments. It only
+  fills an empty sheet, and an untouched insert is taken back out if you switch sides.
+
 Supports Lincoln-Douglas, Policy, and Public Forum.
 
 ## Setup (Windows, macOS or Linux)

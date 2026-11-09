@@ -100,7 +100,13 @@ SIDE_SECTIONS = {
 
 def empty_materials() -> dict:
     # sections: {key: text}; files: [{"name", "text", "side": "aff"|"neg"|"both"}]
-    return {"resolution": "", "sections": {k: "" for k in SECTIONS}, "files": []}
+    return {
+        "resolution": "",
+        "sections": {k: "" for k in SECTIONS},
+        "files": [],
+        # Pre-flow per side: the drafted lines and a hash of the case they were drafted from.
+        "preflow": {"aff": {"text": "", "case_hash": ""}, "neg": {"text": "", "case_hash": ""}},
+    }
 
 
 def load_materials() -> dict:
@@ -117,6 +123,9 @@ def load_materials() -> dict:
         for k, v in (raw.get("sections") or {}).items():
             if k in m["sections"]:
                 m["sections"][k] = v or ""
+        for sd, pf in (raw.get("preflow") or {}).items():
+            if sd in m["preflow"] and isinstance(pf, dict):
+                m["preflow"][sd] = {"text": pf.get("text", "") or "", "case_hash": pf.get("case_hash", "") or ""}
         for f in raw.get("files") or []:
             m["files"].append({"name": f["name"], "text": f.get("text", ""), "side": f.get("side", "both")})
     return m
@@ -230,3 +239,77 @@ def demo_round() -> dict:
 def demo_case_text() -> str:
     path = Path(__file__).resolve().parent.parent / "examples" / "sample_case.md"
     return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+
+# ---------------------------------------------------------------------------
+# Pre-flow: draft once per topic, drop into the debater's own sheet
+# ---------------------------------------------------------------------------
+
+def case_text_for_side(m: dict, side: str) -> str:
+    """The side's constructive case: its case box, or failing that its uploaded files."""
+    text = m["sections"].get(f"{side}_case", "")
+    if text.strip():
+        return text
+    return "\n\n".join(f["text"] for f in m["files"] if f.get("side") == side and f.get("text", "").strip())
+
+
+def case_hash(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:16] if text.strip() else ""
+
+
+def preflow_lines(m: dict, side: str) -> list[str]:
+    return [ln.strip() for ln in m["preflow"][side]["text"].splitlines() if ln.strip()]
+
+
+def own_sheet_index(rnd: dict, side: str) -> int | None:
+    """The sheet whose first column is this side's constructive (1AC sheet for Aff, 1NC sheet for Neg)."""
+    fmt = format_by_key(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
+    first = fmt.speeches_for(side)[0].name
+    for i, sh in enumerate(rnd["sheets"]):
+        if sh["columns"] and sh["columns"][0] == first:
+            return i
+    return None
+
+
+def _col0_empty(sheet: dict) -> bool:
+    return not any((r[0] if r else "").strip() for r in sheet["rows"])
+
+
+def _sheet_is_exactly(sheet: dict, lines: list[str]) -> bool:
+    """True when the sheet holds those lines in column 1 and nothing else (untouched auto-insert)."""
+    filled = [r for r in sheet["rows"] if any(c.strip() for c in r)]
+    return (len(filled) == len(lines)
+            and all(r[0].strip() == ln and not any(c.strip() for c in r[1:]) for r, ln in zip(filled, lines)))
+
+
+def apply_preflow(rnd: dict, m: dict, side: str) -> bool:
+    """Put this side's pre-flow in column 1 of its own sheet if that column is empty.
+
+    If an earlier automatic insert for the other side is still untouched (a mis-click on the
+    side switch), take it back out first. Returns True if the round changed."""
+    changed = False
+    prev = rnd.get("auto_preflow")
+    if prev and prev.get("side") != side:
+        idx = prev.get("sheet")
+        if idx is not None and idx < len(rnd["sheets"]) and _sheet_is_exactly(rnd["sheets"][idx], prev.get("lines", [])):
+            sh = rnd["sheets"][idx]
+            sh["rows"] = _blank_rows(len(sh["columns"]), max(DEFAULT_ROWS, len(sh["rows"])))
+            changed = True
+        rnd.pop("auto_preflow", None)
+
+    lines = preflow_lines(m, side)
+    idx = own_sheet_index(rnd, side)
+    if not lines or idx is None or rnd.get("auto_preflow", {}).get("side") == side:
+        return changed
+    sh = rnd["sheets"][idx]
+    if not _col0_empty(sh):
+        return changed
+    ncols = len(sh["columns"])
+    rows = [[ln] + [""] * (ncols - 1) for ln in lines]
+    rows += _blank_rows(ncols, max(10, DEFAULT_ROWS - len(rows)))
+    sh["rows"] = rows
+    rnd["auto_preflow"] = {"side": side, "sheet": idx, "lines": lines}
+    return True

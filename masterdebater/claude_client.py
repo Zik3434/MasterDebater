@@ -294,3 +294,45 @@ def generate_speech(
         model=msg.model,
         served_by_fallback=served_by_fallback,
     )
+
+
+# ---------------------------------------------------------------------------
+# 3. Pre-flow: case text -> one flow line per argument
+# ---------------------------------------------------------------------------
+
+PREFLOW_SCHEMA = {
+    "type": "object",
+    "properties": {"lines": {"type": "array", "items": {"type": "string"}}},
+    "required": ["lines"],
+    "additionalProperties": False,
+}
+
+PREFLOW_SYSTEM = """You turn a debater's own constructive case into a pre-flow: the column a debater writes on their flow before the round so the opponent's answers can be lined up against each argument.
+
+Rules:
+- One line per argument the opponent could answer, in the order the case reads them: value, criterion/standard, each framework justification, each contention, each sub-point or warrant, each key card, any underview or spike.
+- Write in flow shorthand, the way a debater flows: short, 4 to 15 words, keep author and year for cards (e.g. "C1: homelessness kills, 3.5x mortality (Rivera 24)").
+- Label structure: "V:", "VC:", "FW:", "C1:", "C2:", "Sub A:", "UV:". Repeat no label text inside the line.
+- Use only what is in the case. Do not add arguments, cards or responses. Skip intros, rhetoric and delivery cues such as [BEAT].
+- Between 6 and 30 lines."""
+
+
+def draft_preflow(case_text: str, side_label: str, resolution: str = "",
+                  client: anthropic.Anthropic | None = None) -> list[str]:
+    """Ask Claude for a pre-flow of the debater's case. Returns the lines in order."""
+    client = client or make_client()
+    head = f"Resolution: {resolution.strip()}\n" if resolution.strip() else ""
+    with client.beta.messages.stream(
+        model=MODEL,
+        max_tokens=8000,
+        betas=[FALLBACK_BETA],
+        fallbacks="default",
+        thinking={"type": "adaptive"},
+        output_config={"effort": "low", "format": {"type": "json_schema", "schema": PREFLOW_SCHEMA}},
+        system=PREFLOW_SYSTEM,
+        messages=[{"role": "user", "content": f"{head}This is my {side_label} case. Pre-flow it.\n\n{case_text}"}],
+    ) as stream:
+        msg = stream.get_final_message()
+    _raise_if_refused(msg)
+    text = next(b.text for b in msg.content if b.type == "text")
+    return [ln.strip() for ln in json.loads(text)["lines"] if ln.strip()]

@@ -174,6 +174,36 @@ if focus is None:
                     st.info("Already up to date.")
 
 wpm: int = ss["wpm"]
+ss.setdefault("preflow_error", {})   # side -> (case_hash, message) so a failure isn't retried every rerun
+
+
+def draft_preflow_for(sd: str) -> None:
+    """Draft the pre-flow for one side from its case and save it."""
+    case = store.case_text_for_side(mats, sd)
+    h = store.case_hash(case)
+    try:
+        with st.spinner(f"Drafting your {fmt.side_labels[sd]} pre-flow from your case (one time per topic)..."):
+            lines = cc.draft_preflow(case, fmt.side_labels[sd], mats.get("resolution", ""))
+    except Exception as e:  # noqa: BLE001
+        ss["preflow_error"][sd] = (h, str(e))
+        return
+    ss["preflow_error"].pop(sd, None)
+    mats["preflow"][sd] = {"text": "\n".join(lines), "case_hash": h}
+    store.save_materials(mats)
+
+
+def ensure_preflow(sd: str) -> None:
+    case = store.case_text_for_side(mats, sd)
+    h = store.case_hash(case)
+    failed = ss["preflow_error"].get(sd)
+    if h and not mats["preflow"][sd]["text"].strip() and not (failed and failed[0] == h):
+        draft_preflow_for(sd)
+    if store.apply_preflow(rnd, mats, sd):
+        store.save_round(rnd)
+        bump_grids()
+
+
+ensure_preflow(side)
 
 
 # --------------------------------------------------------------------------- views
@@ -460,6 +490,32 @@ def render_case() -> None:
         box("neg_case", 260)
         box("neg_blocks", 260)
     box("shared", 180)
+
+    st.divider()
+    st.subheader("Pre-flow")
+    st.caption("Drafted once from your case, then dropped into column 1 of your own sheet whenever you pick "
+               "that side on a fresh round. One line per row. Edit freely.")
+    pa, pn = st.columns(2)
+    for col, sd in ((pa, "aff"), (pn, "neg")):
+        with col:
+            pf = mats["preflow"][sd]
+            val = st.text_area(f"{fmt.side_labels[sd]} pre-flow", pf["text"], height=260, key=f"preflow_{sd}",
+                               placeholder="Appears here automatically once that side's case is loaded.")
+            if val != pf["text"]:
+                pf["text"] = val
+                store.save_materials(mats)
+            h = store.case_hash(store.case_text_for_side(mats, sd))
+            err = ss["preflow_error"].get(sd)
+            if err and err[0] == h:
+                st.error("Couldn't draft the pre-flow: " + (
+                    "no API key is set." if "authentication" in err[1].lower() or "api_key" in err[1].lower()
+                    else err[1]))
+            elif h and pf["text"].strip() and pf["case_hash"] and pf["case_hash"] != h:
+                st.info("Your case changed since this was drafted.")
+            if h and st.button(("Redraft" if pf["text"].strip() else "Draft") + " from my case",
+                               key=f"redraft_{sd}"):
+                draft_preflow_for(sd)
+                st.rerun()
 
     st.divider()
     u1, u2 = st.columns([1.4, 1])

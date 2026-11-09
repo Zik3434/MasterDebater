@@ -57,3 +57,28 @@ def test_roundtrip_dict():
     flow = load_flexcel(ROOT / "examples" / "sample_flow.json")
     again = flow_from_dict(json.loads(flow.to_json()))
     assert again.to_text() == flow.to_text()
+
+
+def test_preflow_insert_rules():
+    from masterdebater import store
+
+    m = store.empty_materials()
+    m["preflow"]["aff"]["text"] = "V: morality\nC1: deaths"
+    m["preflow"]["neg"]["text"] = "NC: Kant"
+
+    r = store.new_round("ld")
+    assert store.apply_preflow(r, m, "aff")
+    assert [x[0] for x in r["sheets"][0]["rows"][:2]] == ["V: morality", "C1: deaths"]
+    assert not store.apply_preflow(r, m, "aff")            # idempotent
+
+    # Switching side right after an untouched auto-insert undoes it and fills the other sheet.
+    assert store.apply_preflow(r, m, "neg")
+    assert r["sheets"][0]["rows"][0][0] == ""
+    assert r["sheets"][1]["rows"][0][0] == "NC: Kant"
+
+    # Anything already flowed is never overwritten or removed.
+    r2 = store.new_round("ld")
+    store.apply_preflow(r2, m, "aff")
+    r2["sheets"][0]["rows"][0][1] = "their answer"
+    store.apply_preflow(r2, m, "neg")
+    assert r2["sheets"][0]["rows"][0][:2] == ["V: morality", "their answer"]
