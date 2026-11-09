@@ -194,6 +194,16 @@ def focus_bar(view: str) -> None:
         c2.button("✕ Exit", width="stretch", on_click=exit_focus, help="Back to the normal layout")
 
 
+def header_with_time(col: str) -> str:
+    """'1AR' -> '1AR · 4:00', using the format's time limit. Unknown columns are left as is."""
+    try:
+        minutes = fmt.speech(col).minutes
+    except KeyError:
+        return col
+    secs = round(minutes * 60)
+    return f"{col} · {secs // 60}:{secs % 60:02d}"
+
+
 def render_flow(full: bool) -> None:
     sheet_names = [s["name"] for s in rnd["sheets"]]
     sub = st.tabs(sheet_names + ["Sheets & import"])
@@ -217,7 +227,7 @@ def render_flow(full: bool) -> None:
                 height=grid_height,
                 # A small base width per column: Streamlit spreads the leftover space evenly,
                 # so every speech column stays on screen at once, the way Flexcel lays it out.
-                column_config={c: st.column_config.TextColumn(c, width=120) for c in cols},
+                column_config={c: st.column_config.TextColumn(header_with_time(c), width=120) for c in cols},
             )
             rows = edited.fillna("").astype(str).values.tolist()
             if rows != sheet["rows"]:
