@@ -105,3 +105,15 @@ def test_cx_target_and_background_job():
         time.sleep(0.05)
     snap = cx_job.snapshot()
     assert snap["questions"][0]["question"] == "Q?" and not snap["collected"]
+
+
+def test_sheets_always_have_room():
+    from masterdebater import store
+
+    r = store.new_round("ld")
+    assert len(r["sheets"][0]["rows"]) == store.DEFAULT_ROWS
+    sh = r["sheets"][0]
+    sh["rows"][-1][0] = "typed on the last row"
+    assert store.ensure_room(sh)
+    assert len(sh["rows"]) == store.DEFAULT_ROWS + store.GROW_ROWS
+    assert not store.ensure_room(sh)

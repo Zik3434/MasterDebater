@@ -18,7 +18,9 @@ ROUND_FILE = DATA_DIR / "round.json"
 MATERIALS_FILE = DATA_DIR / "materials.json"
 SPEECH_DIR = DATA_DIR / "speeches"
 
-DEFAULT_ROWS = 30
+DEFAULT_ROWS = 100      # like Flexcel; more are added automatically near the bottom
+MIN_BLANK_ROWS = 15
+GROW_ROWS = 50
 
 LD_SHEETS = [
     ("1AC", ["1AC", "1NC", "1AR", "2NR", "2AR"]),
@@ -80,6 +82,9 @@ def load_round() -> dict:
             return new_round()
         # Rounds saved by older versions lack these fields.
         rnd.setdefault("id", __import__("uuid").uuid4().hex)
+        for sh in rnd.get("sheets", []):
+            sh["rows"] = [["" if c is None else str(c) for c in r] for r in sh["rows"]]
+            ensure_room(sh, minimum=DEFAULT_ROWS)
         rnd.setdefault("cx", {})
         for k, v in {"ask": "", "answers": "", "suggested": [], "suggested_for": ""}.items():
             rnd["cx"].setdefault(k, v)
@@ -352,3 +357,20 @@ def cx_signature(rnd: dict, target: str) -> str:
             i = sh["columns"].index(target)
             parts += [r[i].strip() for r in sh["rows"] if i < len(r) and r[i].strip()]
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16] if parts else ""
+
+
+
+def ensure_room(sheet: dict, minimum: int = 0) -> bool:
+    """Keep at least MIN_BLANK_ROWS empty rows under the last filled row (and `minimum` rows in all),
+    so the flow never runs out of space. Returns True if rows were added."""
+    rows = sheet["rows"]
+    ncols = len(sheet["columns"])
+    last = max((i for i, r in enumerate(rows) if any(str(c).strip() for c in r)), default=-1)
+    blank_below = len(rows) - 1 - last
+    need = max(minimum - len(rows), 0)
+    if blank_below < MIN_BLANK_ROWS:
+        need = max(need, GROW_ROWS)
+    if need:
+        rows.extend([""] * ncols for _ in range(need))
+        sheet["rows"] = [list(r) for r in rows]
+    return bool(need)

@@ -349,8 +349,20 @@ CX_SCHEMA = {
             "type": "array",
             "items": {
                 "type": "object",
-                "properties": {"question": {"type": "string"}, "purpose": {"type": "string"}},
-                "required": ["question", "purpose"],
+                "properties": {
+                    "question": {"type": "string"},
+                    "purpose": {"type": "string"},
+                    "follow_ups": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"if_they_say": {"type": "string"}, "ask": {"type": "string"}},
+                            "required": ["if_they_say", "ask"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["question", "purpose", "follow_ups"],
                 "additionalProperties": False,
             },
         }
@@ -370,7 +382,16 @@ Good questions:
 - Check the warrant or scope of a card the debater plans to attack (study, sample, date, what it actually says).
 - Are short, one idea each, and answerable in a sentence. No speeches, no compound questions, no rhetorical traps the opponent can wave away.
 
-Return 6 to 10 questions, most valuable first. For each, a one-line purpose saying what the answer sets up (for example "If yes, your Kant block turns their C1")."""
+Return 6 to 10 questions, most valuable first. For each, a one-line purpose saying what the answer sets up (for example "If yes, your Kant block turns their C1").
+
+For each question also give 1 to 3 FOLLOW-UPS: the opponent's most likely answer (if_they_say, a few words) and the next question to ask (ask). Follow-ups must be ones that work almost every time, whatever the opponent's style. Build them from these reliable moves:
+- Ask for the evidence: "Which card says that?" / "Can you read me the line?"
+- Ask for the warrant: "Why is that true?" / "What's the reason, not the claim?"
+- Lock in the concession: "So you agree that X?" (restate their answer narrowly, get a yes)
+- Make them pick: "Is it A or B?" when the answer was vague or tried to have it both ways
+- Tie to the framework: "How does that link to your criterion?"
+- Ask for the limit: "What would prove that wrong?" / "Does that apply in every case?"
+Keep each follow-up as short as the main question."""
 
 
 def draft_cx_questions(

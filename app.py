@@ -257,7 +257,7 @@ def render_flow(full: bool) -> None:
             # base frame every rerun (snapshotted per grid version) and treat its output as truth.
             base_key = f"base_{v}_{i}"
             if base_key not in ss:
-                ss[base_key] = pd.DataFrame(sheet["rows"], columns=cols).astype(str)
+                ss[base_key] = pd.DataFrame(sheet["rows"], columns=cols).fillna("").astype(str)
             edited = st.data_editor(
                 ss[base_key],
                 key=f"grid_{v}_{i}",
@@ -272,6 +272,10 @@ def render_flow(full: bool) -> None:
             rows = edited.fillna("").astype(str).values.tolist()
             if rows != sheet["rows"]:
                 sheet["rows"] = rows
+                if store.ensure_room(sheet):      # getting close to the bottom: add rows
+                    store.save_round(rnd)
+                    bump_grids()
+                    st.rerun()
             if not full:
                 st.caption("Click a cell and type. Enter moves down, Tab moves right. Rows are argument "
                            "threads: the first column is the argument, the columns to its right answer it.")
@@ -366,8 +370,16 @@ def cx_error_text(err: str) -> str:
 
 
 def cx_questions_md(qs: list[dict]) -> str:
-    return "\n".join(f"{i}. **{q['question']}**  \n   <span style='opacity:0.6'>{q.get('purpose', '')}</span>"
-                      for i, q in enumerate(qs, 1))
+    import html as _html
+
+    out = []
+    for i, q in enumerate(qs, 1):
+        out.append(f"{i}. **{_html.escape(q['question'])}**  \n"
+                   f"   <span style='opacity:0.6'>{_html.escape(q.get('purpose', ''))}</span>")
+        for f in q.get("follow_ups") or []:
+            out.append(f"   - <span style='opacity:0.75'>If they say <i>{_html.escape(f.get('if_they_say', ''))}</i>:</span> "
+                       f"{_html.escape(f.get('ask', ''))}")
+    return "\n".join(out)
 
 
 def cx_engine() -> None:
@@ -422,7 +434,11 @@ def cx_suggestions() -> None:
             st.markdown(f"**Suggested questions for their {r['cx'].get('suggested_for', '')}**")
             st.markdown(cx_questions_md(qs), unsafe_allow_html=True)
         if st.button("Add these to my questions", key="cx_add"):
-            lines = "\n".join(q["question"] for q in qs)
+            parts = []
+            for q in qs:
+                parts.append(q["question"])
+                parts += [f"    If they say {f.get('if_they_say', '')}: {f.get('ask', '')}" for f in q.get("follow_ups") or []]
+            lines = "\n".join(parts)
             r["cx"]["ask"] = (r["cx"].get("ask", "").rstrip() + "\n" + lines).strip()
             store.save_round(r)
             st.rerun(scope="app")
