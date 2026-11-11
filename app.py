@@ -81,6 +81,21 @@ READING_CSS = """
 .md-speech p { font-size: 1.2rem; line-height: 1.65; margin: 0 0 0.9rem 0; }
 .md-speech.md-big p { font-size: 1.45rem; line-height: 1.7; margin-bottom: 1.1rem; }
 .md-speech a.md-link { color: inherit !important; text-decoration: none !important; display: block; cursor: pointer; }
+.cx-q { border: 1px solid rgba(128,128,128,0.35); border-radius: 14px; margin: 0.45rem 0;
+        background: rgba(128,128,128,0.07); }
+.cx-q > summary { list-style: none; cursor: pointer; padding: 0.6rem 0.9rem; display: flex; gap: 0.7rem;
+                  align-items: baseline; font-weight: 600; }
+.cx-q > summary::-webkit-details-marker { display: none; }
+.cx-q > summary:hover { background: rgba(128,128,128,0.10); border-radius: 14px; }
+.cx-q[open] { border-color: rgba(255,75,75,0.55); background: rgba(255,75,75,0.06); }
+.cx-n { min-width: 1.5rem; height: 1.5rem; border-radius: 999px; background: rgba(128,128,128,0.25);
+        display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; }
+.cx-q[open] .cx-n { background: #ff4b4b; color: #fff; }
+.cx-body { padding: 0 0.9rem 0.7rem 3.1rem; }
+.cx-purpose { opacity: 0.65; margin-bottom: 0.35rem; }
+.cx-body ul { margin: 0; padding-left: 1.1rem; }
+.cx-body li { margin: 0.2rem 0; }
+.cx-if { opacity: 0.75; }
 .md-speech h2 { font-size: 0.85rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.6;
                 margin: 1.3rem 0 0.4rem 0; padding-bottom: 0.2rem; border-bottom: 1px solid rgba(128,128,128,0.35); }
 </style>
@@ -370,16 +385,22 @@ def cx_error_text(err: str) -> str:
 
 
 def cx_questions_md(qs: list[dict]) -> str:
+    """Each question as a collapsed bubble; click it to see the purpose and the follow-ups."""
     import html as _html
 
-    out = []
+    out = ['<div class="cx-bubbles">']
     for i, q in enumerate(qs, 1):
-        out.append(f"{i}. **{_html.escape(q['question'])}**  \n"
-                   f"   <span style='opacity:0.6'>{_html.escape(q.get('purpose', ''))}</span>")
-        for f in q.get("follow_ups") or []:
-            out.append(f"   - <span style='opacity:0.75'>If they say <i>{_html.escape(f.get('if_they_say', ''))}</i>:</span> "
-                       f"{_html.escape(f.get('ask', ''))}")
-    return "\n".join(out)
+        body = f'<div class="cx-purpose">{_html.escape(q.get("purpose", ""))}</div>'
+        fus = q.get("follow_ups") or []
+        if fus:
+            body += "<ul>" + "".join(
+                f'<li><span class="cx-if">If they say <i>{_html.escape(f.get("if_they_say", ""))}</i>:</span> '
+                f'{_html.escape(f.get("ask", ""))}</li>' for f in fus) + "</ul>"
+        out.append(f'<details class="cx-q"><summary><span class="cx-n">{i}</span>'
+                   f'<span class="cx-text">{_html.escape(q["question"])}</span></summary>'
+                   f'<div class="cx-body">{body}</div></details>')
+    out.append("</div>")
+    return "".join(out)
 
 
 def cx_engine() -> None:
