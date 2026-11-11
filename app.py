@@ -61,6 +61,15 @@ def enter_read(speech_name: str) -> None:
     st.query_params["read"] = speech_name
 
 
+def reset_flow() -> None:
+    """Blank every sheet (keeping the sheet layout), then let the pre-flow go back in."""
+    for sh in rnd["sheets"]:
+        sh["rows"] = [[""] * len(sh["columns"]) for _ in range(store.DEFAULT_ROWS)]
+    rnd.pop("auto_preflow", None)
+    store.save_round(rnd)
+    bump_grids()
+
+
 def toggle_labels() -> None:
     rnd["show_labels"] = not rnd.get("show_labels", True)
     store.save_round(rnd)
@@ -563,8 +572,13 @@ elif focus == "read":
 else:
     tab_flow, tab_cx, tab_speech, tab_case = st.tabs(["Flow", "Cross-ex", "Speech", "Case & Blocks"])
     with tab_flow:
-        st.button("⛶ Full screen", key="fs_flow", on_click=enter_focus, args=("flow",),
-                  help="Hide the sidebar and tabs so the flow fills the window")
+        b_full, b_reset, _ = st.columns([1, 1, 5])
+        b_full.button("⛶ Full screen", key="fs_flow", on_click=enter_focus, args=("flow",), width="stretch",
+                      help="Hide the sidebar and tabs so the flow fills the window")
+        with b_reset.popover("↺ Reset flow", width="stretch"):
+            st.write("Clear every sheet on the flow? Your cross-ex notes and speeches stay. "
+                     "Your pre-flow goes back in.")
+            st.button("Yes, clear the flow", key="reset_flow_yes", type="primary", on_click=reset_flow)
         render_flow(full=False)
     with tab_cx:
         render_cx()
