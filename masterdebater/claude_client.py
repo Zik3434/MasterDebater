@@ -336,3 +336,76 @@ def draft_preflow(case_text: str, side_label: str, resolution: str = "",
     _raise_if_refused(msg)
     text = next(b.text for b in msg.content if b.type == "text")
     return [ln.strip() for ln in json.loads(text)["lines"] if ln.strip()]
+
+
+# ---------------------------------------------------------------------------
+# 4. Cross-ex questions from the flow
+# ---------------------------------------------------------------------------
+
+CX_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"question": {"type": "string"}, "purpose": {"type": "string"}},
+                "required": ["question", "purpose"],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["questions"],
+    "additionalProperties": False,
+}
+
+CX_SYSTEM = """You write cross-examination questions for a high-school debater who is about to cross-examine the opponent's speech that was just given.
+
+Use the FLOW for what the opponent actually said, and the debater's own MATERIALS (case and blocks) for what the debater will argue next, so the questions set up those arguments. Never ask about something the opponent did not say.
+
+Good questions:
+- Pin down vague claims and definitions ("What does 'resurrection' mean in your definition?").
+- Get concessions the debater's blocks can use later.
+- Expose contradictions between their framework and their contentions, or between two of their claims.
+- Check the warrant or scope of a card the debater plans to attack (study, sample, date, what it actually says).
+- Are short, one idea each, and answerable in a sentence. No speeches, no compound questions, no rhetorical traps the opponent can wave away.
+
+Return 6 to 10 questions, most valuable first. For each, a one-line purpose saying what the answer sets up (for example "If yes, your Kant block turns their C1")."""
+
+
+def draft_cx_questions(
+    flow: Flow,
+    side: str,
+    target_speech: str,
+    materials_text: str,
+    resolution: str = "",
+    client: anthropic.Anthropic | None = None,
+) -> list[dict]:
+    """Questions for cross-examining the opponent's `target_speech`. Returns [{question, purpose}]."""
+    client = client or make_client()
+    fmt = flow.format
+    me = fmt.side_labels[side]
+    head = f"RESOLUTION: {resolution.strip()}\n" if resolution.strip() else ""
+    with client.beta.messages.stream(
+        model=MODEL,
+        max_tokens=8000,
+        betas=[FALLBACK_BETA],
+        fallbacks="default",
+        thinking={"type": "adaptive"},
+        output_config={"effort": "low", "format": {"type": "json_schema", "schema": CX_SCHEMA}},
+        system=CX_SYSTEM,
+        messages=[{
+            "role": "user",
+            "content": [
+                # Materials stay the same all round, so cache them; only the flow changes between drafts.
+                {"type": "text", "text": f"{head}I am the {me}.\n\n=== MATERIALS (mine) ===\n{materials_text}",
+                 "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": f"=== FLOW ===\n{flow.to_text() or '(empty flow)'}\n\n"
+                                         f"Write my cross-ex questions for their {target_speech}."},
+            ],
+        }],
+    ) as stream:
+        msg = stream.get_final_message()
+    _raise_if_refused(msg)
+    text = next(b.text for b in msg.content if b.type == "text")
+    return [q for q in json.loads(text)["questions"] if q.get("question", "").strip()]

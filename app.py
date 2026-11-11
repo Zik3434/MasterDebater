@@ -6,13 +6,14 @@ Run:  streamlit run app.py
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
 from masterdebater import claude_client as cc
-from masterdebater import store
+from masterdebater import cx_job, store
 from masterdebater.docx_out import write_speech_docx
 from masterdebater.flow import next_speech, parse_flexcel
 from masterdebater.materials import bundle_materials, read_material_bytes
@@ -325,8 +326,134 @@ def render_flow(full: bool) -> None:
                 st.error(f"Could not read that file: {e}")
 
 
+CX_IDLE_SECONDS = 15   # auto-draft once the flow of their speech has been still this long
+
+
+def start_cx_draft() -> str:
+    """Kick off a background draft for the opponent's latest constructive. Returns a status word."""
+    r = ss["round"]
+    target = store.cx_target(r, side)
+    if not target:
+        return "nothing"
+    sig = store.cx_signature(r, target)
+    flow = store.round_to_flow(r)
+    mtext = bundle_materials(store.materials_for_side(mats, side))
+    res = mats.get("resolution", "")
+    ok = cx_job.start(r["id"], sig, target,
+                      lambda: cc.draft_cx_questions(flow, side, target, mtext, res))
+    return "started" if ok else "busy"
+
+
+def collect_cx() -> None:
+    """Copy a finished background draft into the round (main thread only)."""
+    snap = cx_job.snapshot()
+    if snap["running"] or snap["collected"]:
+        return
+    r = ss["round"]
+    if snap["round_id"] == r["id"]:
+        if snap["questions"]:
+            r["cx"]["suggested"] = snap["questions"]
+            r["cx"]["suggested_for"] = snap["target"]
+            store.save_round(r)
+        ss["cx_error"] = snap["error"]
+    cx_job.mark_collected()
+
+
+def cx_error_text(err: str) -> str:
+    if "authentication" in err.lower() or "api_key" in err.lower():
+        return "Couldn't draft questions: no API key is set."
+    return "Couldn't draft questions: " + err
+
+
+def cx_questions_md(qs: list[dict]) -> str:
+    return "\n".join(f"{i}. **{q['question']}**  \n   <span style='opacity:0.6'>{q.get('purpose', '')}</span>"
+                      for i, q in enumerate(qs, 1))
+
+
+def cx_engine() -> None:
+    """Runs every few seconds: collects finished drafts and, with auto on, starts new ones."""
+    collect_cx()
+    r = ss["round"]
+    snap = cx_job.snapshot()
+    running = snap["running"] and snap["round_id"] == r["id"]
+    status = ""
+    if mats.get("cx_auto"):
+        target = store.cx_target(r, side)
+        if not target:
+            status = "Cross-ex auto-draft is on. Waiting for their constructive on the flow."
+        else:
+            sig = store.cx_signature(r, target)
+            if sig != ss.get("cx_seen_sig"):
+                ss["cx_seen_sig"], ss["cx_seen_at"] = sig, time.time()
+            done_for_sig = snap["sig"] == sig and snap["round_id"] == r["id"]
+            idle = time.time() - ss.get("cx_seen_at", 0)
+            if not snap["running"] and not done_for_sig and idle >= CX_IDLE_SECONDS:
+                start_cx_draft()
+                running = True
+            if running:
+                status = f"Drafting cross-ex questions for their {target}..."
+            elif r["cx"]["suggested"] and done_for_sig:
+                status = f"{len(r['cx']['suggested'])} cross-ex questions ready for their {target}."
+            else:
+                status = "Cross-ex questions will update when you pause typing."
+    elif running:
+        status = "Drafting cross-ex questions..."
+    if focus == "read":
+        return
+    if status:
+        st.caption(status)
+    if focus == "flow" and r["cx"]["suggested"]:
+        with st.expander(f"Cross-ex questions ({len(r['cx']['suggested'])})"):
+            st.markdown(cx_questions_md(r["cx"]["suggested"]), unsafe_allow_html=True)
+
+
+def cx_suggestions() -> None:
+    """The suggested-questions box on the Cross-ex tab; refreshes itself while drafting."""
+    collect_cx()
+    r = ss["round"]
+    snap = cx_job.snapshot()
+    if snap["running"] and snap["round_id"] == r["id"]:
+        st.info(f"Drafting questions for their {snap['target']}...")
+    if ss.get("cx_error"):
+        st.error(cx_error_text(ss["cx_error"]))
+    qs = r["cx"]["suggested"]
+    if qs:
+        with st.container(border=True):
+            st.markdown(f"**Suggested questions for their {r['cx'].get('suggested_for', '')}**")
+            st.markdown(cx_questions_md(qs), unsafe_allow_html=True)
+        if st.button("Add these to my questions", key="cx_add"):
+            lines = "\n".join(q["question"] for q in qs)
+            r["cx"]["ask"] = (r["cx"].get("ask", "").rstrip() + "\n" + lines).strip()
+            store.save_round(r)
+            st.rerun(scope="app")
+    elif not (snap["running"] and snap["round_id"] == r["id"]):
+        st.caption("No questions drafted yet.")
+
+
 def render_cx() -> None:
     """Cross-ex answers and round notes. Everything here goes to the speech writer."""
+    t1, t2 = st.columns([3, 1])
+    with t1:
+        auto = st.toggle(
+            "Auto-draft questions while I flow", value=mats.get("cx_auto", False),
+            help=f"Drafts after you stop typing for about {CX_IDLE_SECONDS} seconds, only while their "
+                 "constructive is on the flow. Each draft costs about 1 to 2 cents.")
+        if auto != mats.get("cx_auto", False):
+            mats["cx_auto"] = auto
+            store.save_materials(mats)
+            st.rerun()
+    with t2:
+        if st.button("Draft questions now", width="stretch", type="primary"):
+            ss["cx_error"] = None
+            if start_cx_draft() == "nothing":
+                st.warning("Nothing to question yet. Flow their constructive first.")
+            else:
+                st.rerun()
+    snap = cx_job.snapshot()
+    polling = snap["running"] and snap["round_id"] == ss["round"]["id"]
+    st.fragment(cx_suggestions, run_every=(3 if polling or mats.get("cx_auto") else None))()
+
+    st.divider()
     st.caption("Everything on this tab is handed to the speech writer along with the flow. "
                "Concessions, admissions and clarifications from cross-ex are the most valuable thing you can put here.")
     c1, c2 = st.columns([1.4, 1])
@@ -558,6 +685,10 @@ def render_case() -> None:
 
 
 # --------------------------------------------------------------------------- layout
+_snap = cx_job.snapshot()
+_poll = mats.get("cx_auto") or (_snap["running"] or not _snap["collected"])
+st.fragment(cx_engine, run_every=(3 if _poll else None))()
+
 if focus == "flow":
     st.markdown(FOCUS_CSS, unsafe_allow_html=True)
     focus_bar("flow")

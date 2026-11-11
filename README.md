@@ -33,6 +33,12 @@ Everything happens inside one window with three tabs:
   column 1 of your own sheet, so the opponent's answers line up against your arguments. It only
   fills an empty sheet, and an untouched insert is taken back out if you switch sides.
 
+* **Cross-ex questions.** On the Cross-ex tab, turn on **Auto-draft questions while I flow** and the
+  app drafts questions for the opponent's latest constructive in the background whenever you stop
+  typing for about 15 seconds, so they are ready when the speech ends (about 1 to 2 cents a draft).
+  Or leave it off and press **Draft questions now**. In full-screen flow the questions sit in a
+  panel above the grid.
+
 Supports Lincoln-Douglas, Policy, and Public Forum.
 
 ## Setup (Windows, macOS or Linux)

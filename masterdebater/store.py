@@ -65,7 +65,8 @@ def new_round(fmt_key: str = "ld", first_speaker: str = "pro", name: str = "") -
         "first_speaker": first_speaker,
         "side": "aff",
         "sheets": default_sheets(fmt_key, first_speaker),
-        "cx": {"ask": "", "answers": ""},
+        "id": __import__("uuid").uuid4().hex,
+        "cx": {"ask": "", "answers": "", "suggested": [], "suggested_for": ""},
         "notes": "",
         "speeches": [],   # [{"speech": "1AR", "text": ..., "notes": ..., "words": n, "at": iso}]
     }
@@ -74,9 +75,15 @@ def new_round(fmt_key: str = "ld", first_speaker: str = "pro", name: str = "") -
 def load_round() -> dict:
     if ROUND_FILE.exists():
         try:
-            return json.loads(ROUND_FILE.read_text(encoding="utf-8"))
+            rnd = json.loads(ROUND_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            pass
+            return new_round()
+        # Rounds saved by older versions lack these fields.
+        rnd.setdefault("id", __import__("uuid").uuid4().hex)
+        rnd.setdefault("cx", {})
+        for k, v in {"ask": "", "answers": "", "suggested": [], "suggested_for": ""}.items():
+            rnd["cx"].setdefault(k, v)
+        return rnd
     return new_round()
 
 
@@ -104,6 +111,7 @@ def empty_materials() -> dict:
         "resolution": "",
         "sections": {k: "" for k in SECTIONS},
         "files": [],
+        "cx_auto": False,   # auto-draft cross-ex questions while flowing
         # Pre-flow per side: the drafted lines and a hash of the case they were drafted from.
         "preflow": {"aff": {"text": "", "case_hash": ""}, "neg": {"text": "", "case_hash": ""}},
     }
@@ -120,6 +128,7 @@ def load_materials() -> dict:
         if raw.get("pasted", "").strip():
             m["sections"]["shared"] = raw["pasted"]
         m["resolution"] = raw.get("resolution", "") or ""
+        m["cx_auto"] = bool(raw.get("cx_auto", False))
         for k, v in (raw.get("sections") or {}).items():
             if k in m["sections"]:
                 m["sections"][k] = v or ""
@@ -313,3 +322,33 @@ def apply_preflow(rnd: dict, m: dict, side: str) -> bool:
     sh["rows"] = rows
     rnd["auto_preflow"] = {"side": side, "sheet": idx, "lines": lines}
     return True
+
+
+
+# ---------------------------------------------------------------------------
+# Cross-ex: which opponent speech to question, and when the flow of it changed
+# ---------------------------------------------------------------------------
+
+def cx_target(rnd: dict, side: str) -> str | None:
+    """The opponent's latest constructive that has anything flowed, or None."""
+    fmt = format_by_key(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
+    opp = "neg" if side == "aff" else "aff"
+    flow = round_to_flow(rnd)
+    filled = set(flow.speeches_with_content())
+    target = None
+    for sp in fmt.speeches:
+        if sp.side == opp and sp.kind in ("constructive", "block") and sp.name in filled:
+            target = sp.name
+    return target
+
+
+def cx_signature(rnd: dict, target: str) -> str:
+    """Hash of everything flowed in the target speech's columns, across all sheets."""
+    import hashlib
+
+    parts = []
+    for sh in rnd["sheets"]:
+        if target in sh["columns"]:
+            i = sh["columns"].index(target)
+            parts += [r[i].strip() for r in sh["rows"] if i < len(r) and r[i].strip()]
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16] if parts else ""

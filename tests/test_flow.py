@@ -82,3 +82,26 @@ def test_preflow_insert_rules():
     r2["sheets"][0]["rows"][0][1] = "their answer"
     store.apply_preflow(r2, m, "neg")
     assert r2["sheets"][0]["rows"][0][:2] == ["V: morality", "their answer"]
+
+
+def test_cx_target_and_background_job():
+    import time
+    from masterdebater import cx_job, store
+
+    r = store.new_round("ld")
+    assert store.cx_target(r, "neg") is None
+    r["sheets"][0]["rows"][0][0] = "FW: util"          # their 1AC
+    assert store.cx_target(r, "neg") == "1AC"
+    r["sheets"][1]["rows"][0][0] = "NC: Kant"          # their 1NC
+    assert store.cx_target(r, "aff") == "1NC"
+    sig = store.cx_signature(r, "1NC")
+    r["sheets"][1]["rows"][1][0] = "NC C1"
+    assert store.cx_signature(r, "1NC") != sig
+
+    assert cx_job.start("r1", "s", "1NC", lambda: [{"question": "Q?", "purpose": "p"}])
+    for _ in range(50):
+        if not cx_job.snapshot()["running"]:
+            break
+        time.sleep(0.05)
+    snap = cx_job.snapshot()
+    assert snap["questions"][0]["question"] == "Q?" and not snap["collected"]
