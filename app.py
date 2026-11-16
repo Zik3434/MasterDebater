@@ -259,6 +259,13 @@ def header_with_time(col: str) -> str:
     return f"{col} · {secs // 60}:{secs % 60:02d}"
 
 
+# Cleared cells should look empty, not show a grey "None". Older Streamlit versions don't have
+# the placeholder option, so only pass it where it exists.
+import inspect as _inspect
+
+GRID_EXTRAS = {"placeholder": ""} if "placeholder" in _inspect.signature(st.data_editor).parameters else {}
+
+
 def render_flow(full: bool) -> None:
     sheet_names = [s["name"] for s in rnd["sheets"]]
     sub = st.tabs(sheet_names + ["Sheets & import"])
@@ -280,6 +287,7 @@ def render_flow(full: bool) -> None:
                 width="stretch",
                 hide_index=True,
                 height=grid_height,
+                **GRID_EXTRAS,
                 # A small base width per column: Streamlit spreads the leftover space evenly,
                 # so every speech column stays on screen at once, the way Flexcel lays it out.
                 column_config={c: st.column_config.TextColumn(header_with_time(c), width=120) for c in cols},
@@ -292,8 +300,9 @@ def render_flow(full: bool) -> None:
                     bump_grids()
                     st.rerun()
             if not full:
-                st.caption("Click a cell and type. Enter moves down, Tab moves right. Rows are argument "
-                           "threads: the first column is the argument, the columns to its right answer it.")
+                st.caption("Click a cell and type. Enter moves down, Tab moves right. Drag across cells (or "
+                           "Shift+click) to select several, then press the Delete key to clear them all. Rows are "
+                           "argument threads: the first column is the argument, the columns to its right answer it.")
 
     with sub[len(sheet_names)]:
         st.subheader("Add a sheet")
