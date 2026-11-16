@@ -33,6 +33,49 @@ if "read" in st.query_params:          # a click on the speech text lands here
     ss["focus"] = "read"
     ss["read_speech"] = st.query_params["read"]
 
+# Streamlit's grid turns off multi-cell selection (drag to select, the fill handle, column
+# resizing) when the browser says its main pointer is a touchscreen, which touchscreen laptops
+# do even when a mouse or trackpad is in use. Tell the page the pointer is precise so the grid
+# keeps those features.
+_FINE_POINTER_JS = """
+(function () {
+  var w = window;
+  try { if (window.parent && window.parent !== window && window.parent.document) { w = window.parent; } } catch (e) {}
+  if (w.__mdFinePointer || !w.matchMedia) { return; }
+  w.__mdFinePointer = true;
+  var orig = w.matchMedia.bind(w);
+  w.matchMedia = function (q) {
+    if (typeof q === "string" && q.replace(/\\s/g, "") === "(pointer:coarse)") {
+      return {matches: false, media: q, onchange: null,
+              addListener: function () {}, removeListener: function () {},
+              addEventListener: function () {}, removeEventListener: function () {},
+              dispatchEvent: function () { return false; }};
+    }
+    return orig(q);
+  };
+})();
+"""
+
+
+def enable_multiselect_on_touch() -> None:
+    import inspect
+
+    if "unsafe_allow_javascript" in inspect.signature(st.html).parameters:
+        st.html(f"<script>{_FINE_POINTER_JS}</script>", unsafe_allow_javascript=True)
+    else:   # older Streamlit: run it from a zero-height frame that reaches up to the page
+        import streamlit.components.v1 as components
+
+        components.html(f"<script>{_FINE_POINTER_JS}</script>", height=0)
+
+
+if not ss.get("pointer_ready"):
+    # The grid reads the pointer type once, when it first appears. On a fresh page load, apply
+    # the setting first, give the browser a moment, then draw the app.
+    ss["pointer_ready"] = True
+    enable_multiselect_on_touch()
+    time.sleep(0.5)
+    st.rerun()
+
 rnd: dict = ss["round"]
 mats: dict = ss["materials"]
 fmt = store.format_by_key(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
@@ -765,6 +808,8 @@ else:
         render_speech(full=False)
     with tab_case:
         render_case()
+
+enable_multiselect_on_touch()
 
 # --------------------------------------------------------------------------- autosave
 store.save_round(rnd)
