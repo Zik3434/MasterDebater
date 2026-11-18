@@ -260,11 +260,34 @@ def draft_preflow_for(sd: str) -> None:
     store.save_materials(mats)
 
 
+def absorb_grid_edits() -> None:
+    """Copy edits still held by the grid widgets into the round.
+
+    The grids are normally read further down the script. Anything that rebuilds them before that
+    point (a pre-flow dropping in) would otherwise throw away the cell that was just typed."""
+    v = ss["grid_version"]
+    for i, sheet in enumerate(rnd["sheets"]):
+        state = ss.get(f"grid_{v}_{i}")
+        if not isinstance(state, dict) or state.get("deleted_rows"):
+            continue
+        cols = sheet["columns"]
+        for r, changes in (state.get("edited_rows") or {}).items():
+            r = int(r)
+            if 0 <= r < len(sheet["rows"]):
+                for col, val in changes.items():
+                    if col in cols:
+                        sheet["rows"][r][cols.index(col)] = "" if val is None else str(val)
+
+
 def ensure_preflow(sd: str) -> None:
+    absorb_grid_edits()
     case = store.case_text_for_side(mats, sd)
     h = store.case_hash(case)
     failed = ss["preflow_error"].get(sd)
-    if h and not mats["preflow"][sd]["text"].strip() and not (failed and failed[0] == h):
+    pf = mats["preflow"][sd]
+    # Automatic drafting happens once per version of the case. If it was already drafted for this
+    # exact case (even if the box was emptied since), only the Draft button drafts again.
+    if h and not pf["text"].strip() and pf.get("case_hash") != h and not (failed and failed[0] == h):
         draft_preflow_for(sd)
     if store.apply_preflow(rnd, mats, sd):
         store.save_round(rnd)
@@ -686,6 +709,21 @@ def render_read() -> None:
                 unsafe_allow_html=True)
 
 
+def synced_text_area(label: str, key: str, current: str, **kw) -> str:
+    """A text area that shows `current` (the saved value) and returns what the user typed.
+
+    A keyed Streamlit widget remembers its own contents and ignores a changed `value`, so when the
+    app itself changes the saved text (a drafted pre-flow, a loaded demo case) the stale widget
+    would hand back its old contents and overwrite it. Push the saved text into the widget
+    whenever it differs from what the widget last returned."""
+    shadow = f"_shadow_{key}"
+    if key not in ss or ss.get(shadow) != current:
+        ss[key] = current
+    val = st.text_area(label, key=key, **kw)
+    ss[shadow] = val
+    return val
+
+
 def render_case() -> None:
     res = st.text_input(
         "Resolution", mats.get("resolution", ""),
@@ -699,11 +737,13 @@ def render_case() -> None:
                "material and vice versa. Everything here stays saved on this computer.")
 
     def box(key: str, height: int) -> None:
-        val = st.text_area(store.SECTIONS[key], mats["sections"].get(key, ""), height=height, key=f"mat_{key}",
-                           placeholder="Open it in Google Docs or Word, Ctrl+A, Ctrl+C, then Ctrl+V here.")
+        val = synced_text_area(store.SECTIONS[key], f"mat_{key}", mats["sections"].get(key, ""), height=height,
+                               placeholder="Open it in Google Docs or Word, Ctrl+A, Ctrl+C, then Ctrl+V here.")
         if val != mats["sections"].get(key, ""):
             mats["sections"][key] = val
             store.save_materials(mats)
+            if key.endswith("_case"):
+                st.rerun()   # draft the pre-flow now, while on this tab, not at the next cell edit
 
     aff_col, neg_col = st.columns(2)
     with aff_col:
@@ -724,8 +764,8 @@ def render_case() -> None:
     for col, sd in ((pa, "aff"), (pn, "neg")):
         with col:
             pf = mats["preflow"][sd]
-            val = st.text_area(f"{fmt.side_labels[sd]} pre-flow", pf["text"], height=260, key=f"preflow_{sd}",
-                               placeholder="Appears here automatically once that side's case is loaded.")
+            val = synced_text_area(f"{fmt.side_labels[sd]} pre-flow", f"preflow_{sd}", pf["text"], height=260,
+                                   placeholder="Appears here automatically once that side's case is loaded.")
             if val != pf["text"]:
                 pf["text"] = val
                 store.save_materials(mats)

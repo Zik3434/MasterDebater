@@ -322,9 +322,13 @@ def apply_preflow(rnd: dict, m: dict, side: str) -> bool:
     if not _col0_empty(sh):
         return changed
     ncols = len(sh["columns"])
-    rows = [[ln] + [""] * (ncols - 1) for ln in lines]
-    rows += _blank_rows(ncols, max(10, DEFAULT_ROWS - len(rows)))
+    rows = [list(r) + [""] * (ncols - len(r)) for r in sh["rows"]]
+    while len(rows) < len(lines):
+        rows.append([""] * ncols)
+    for i, ln in enumerate(lines):          # fill column 1 only; keep whatever is in the others
+        rows[i][0] = ln
     sh["rows"] = rows
+    ensure_room(sh, minimum=DEFAULT_ROWS)
     rnd["auto_preflow"] = {"side": side, "sheet": idx, "lines": lines}
     return True
 

@@ -117,3 +117,16 @@ def test_sheets_always_have_room():
     assert store.ensure_room(sh)
     assert len(sh["rows"]) == store.DEFAULT_ROWS + store.GROW_ROWS
     assert not store.ensure_room(sh)
+
+
+def test_preflow_insert_keeps_other_columns():
+    from masterdebater import store
+
+    m = store.empty_materials()
+    m["preflow"]["aff"]["text"] = "V: morality\nC1: deaths"
+    r = store.new_round("ld")
+    r["sheets"][0]["rows"][0][1] = "their answer, typed before the pre-flow existed"
+    assert store.apply_preflow(r, m, "aff")
+    assert r["sheets"][0]["rows"][0] == ["V: morality", "their answer, typed before the pre-flow existed", "", "", ""]
+    assert r["sheets"][0]["rows"][1][0] == "C1: deaths"
+    assert len(r["sheets"][0]["rows"]) >= store.DEFAULT_ROWS
