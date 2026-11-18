@@ -216,6 +216,11 @@ if focus is None:
 
         st.divider()
         rnd["name"] = st.text_input("Round name", rnd.get("name", ""))
+        rnd["judge"] = st.text_area(
+            "Judge paradigm", rnd.get("judge", ""), height=150,
+            placeholder="Paste the judge's paradigm from Tabroom. Speeches and cross-ex questions are "
+                        "written for this judge. Cleared when you start a new round.",
+        )
         if st.button("New round (clears the flow)", width="stretch"):
             ss["round"] = store.new_round(rnd.get("format", "ld"), rnd.get("first_speaker", "pro"))
             ss["round"]["side"] = side
@@ -442,8 +447,9 @@ def start_cx_draft(manual: bool = False) -> str:
     flow = store.round_to_flow(r)
     mtext = bundle_materials(store.materials_for_side(mats, side))
     res = mats.get("resolution", "")
+    judge = r.get("judge", "")
     ok = cx_job.start(r["id"], sig, target,
-                      lambda: cc.draft_cx_questions(flow, side, target, mtext, res), manual=manual)
+                      lambda: cc.draft_cx_questions(flow, side, target, mtext, res, judge=judge), manual=manual)
     return "started" if ok else "busy"
 
 
@@ -666,7 +672,7 @@ def render_speech(full: bool) -> None:
                 res = cc.generate_speech(
                     flow, side, speech, bundle_materials(materials_pairs), wpm=wpm,
                     extra_instructions=extra, on_text=on_text, round_context=store.round_context(rnd),
-                    resolution=mats.get("resolution", ""),
+                    resolution=mats.get("resolution", ""), judge=rnd.get("judge", ""),
                 )
             box.empty()
             entry = {

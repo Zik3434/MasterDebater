@@ -140,6 +140,7 @@ CRAFT:
 - When you quote a card from MATERIALS, give the tag and cite (author/year) exactly as it appears there, and quote only what is in the file.
 - Match the speech's job: constructives read the case; rebuttals answer and extend; the final speech crystallizes.
 - Stay inside the word target; it is derived from the time limit. Tight sentences, no filler, no throat-clearing.
+- JUDGE: if a JUDGE PARADIGM is given, write for that judge. Follow what they say they vote on and how they weigh, match the amount of jargon and the pace they ask for, lead with the kinds of arguments they prefer, and avoid what they say they dislike. If they want slower, clearer debate, make fewer and better-developed arguments inside the same word target. The paradigm never overrides the HARD RULES. In the coach notes, add one or two lines on how the speech was adapted to this judge and anything in the paradigm the debater should handle in delivery.
 
 OUTPUT FORMAT - two parts, in this order:
 
@@ -178,6 +179,7 @@ def build_speech_prompt(
     extra_instructions: str = "",
     round_context: str = "",
     resolution: str = "",
+    judge: str = "",
 ) -> str:
     side_label = fmt.side_labels[side]
     opp_label = fmt.side_labels["neg" if side == "aff" else "aff"]
@@ -202,6 +204,8 @@ def build_speech_prompt(
             "NOTE: This flow was transcribed from a screenshot, so only the visible sheet is "
             "included and some cells may be marked [unreadable]."
         )
+    if judge.strip():
+        parts.append("=== JUDGE PARADIGM (written by the judge; adapt the speech to it) ===\n" + judge.strip())
     if extra_instructions.strip():
         parts.append("EXTRA INSTRUCTIONS FROM THE DEBATER:\n" + extra_instructions.strip())
 
@@ -246,6 +250,7 @@ def generate_speech(
     on_text=None,
     round_context: str = "",
     resolution: str = "",
+    judge: str = "",
 ) -> SpeechResult:
     """Write the requested speech. `on_text(chunk)` receives streamed text if given."""
     client = client or make_client()
@@ -255,7 +260,7 @@ def generate_speech(
         raise ValueError(f"{speech_name} belongs to the {fmt.side_labels[speech.side]}, not the {fmt.side_labels[side]}")
 
     prompt = build_speech_prompt(
-        flow, fmt, speech, side, materials_text, wpm, extra_instructions, round_context, resolution
+        flow, fmt, speech, side, materials_text, wpm, extra_instructions, round_context, resolution, judge
     )
 
     with client.beta.messages.stream(
@@ -401,12 +406,17 @@ def draft_cx_questions(
     materials_text: str,
     resolution: str = "",
     client: anthropic.Anthropic | None = None,
+    judge: str = "",
 ) -> list[dict]:
     """Questions for cross-examining the opponent's `target_speech`. Returns [{question, purpose}]."""
     client = client or make_client()
     fmt = flow.format
     me = fmt.side_labels[side]
     head = f"RESOLUTION: {resolution.strip()}\n" if resolution.strip() else ""
+    judge_block = (
+        "=== JUDGE PARADIGM (pick questions and a tone this judge will reward; skip anything they "
+        f"say they dislike in cross-ex) ===\n{judge.strip()}\n\n" if judge.strip() else ""
+    )
     with client.beta.messages.stream(
         model=MODEL,
         max_tokens=8000,
@@ -421,7 +431,7 @@ def draft_cx_questions(
                 # Materials stay the same all round, so cache them; only the flow changes between drafts.
                 {"type": "text", "text": f"{head}I am the {me}.\n\n=== MATERIALS (mine) ===\n{materials_text}",
                  "cache_control": {"type": "ephemeral"}},
-                {"type": "text", "text": f"=== FLOW ===\n{flow.to_text() or '(empty flow)'}\n\n"
+                {"type": "text", "text": judge_block + f"=== FLOW ===\n{flow.to_text() or '(empty flow)'}\n\n"
                                          f"Write my cross-ex questions for their {target_speech}."},
             ],
         }],

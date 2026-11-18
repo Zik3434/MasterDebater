@@ -39,6 +39,10 @@ Everything happens inside one window with three tabs:
   Or leave it off and press **Draft questions now**. In full-screen flow the questions sit in a
   panel above the grid.
 
+* **Judge paradigm.** Paste the judge's paradigm into the sidebar box for the round. Speeches and
+  cross-ex questions are written for that judge, and the coach notes say how the speech was adapted.
+  It is cleared when you start a new round.
+
 Supports Lincoln-Douglas, Policy, and Public Forum.
 
 ## Setup (Windows, macOS or Linux)

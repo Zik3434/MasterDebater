@@ -71,6 +71,7 @@ def new_round(fmt_key: str = "ld", first_speaker: str = "pro", name: str = "") -
         "cx": {"ask": "", "answers": "", "suggested": [], "suggested_for": "",
                "pending": [], "pending_for": ""},
         "notes": "",
+        "judge": "",      # the judge's paradigm for this round, pasted by the debater
         "speeches": [],   # [{"speech": "1AR", "text": ..., "notes": ..., "words": n, "at": iso}]
     }
 
@@ -86,6 +87,7 @@ def load_round() -> dict:
         for sh in rnd.get("sheets", []):
             sh["rows"] = [["" if c is None else str(c) for c in r] for r in sh["rows"]]
             ensure_room(sh, minimum=DEFAULT_ROWS)
+        rnd.setdefault("judge", "")
         rnd.setdefault("cx", {})
         for k, v in {"ask": "", "answers": "", "suggested": [], "suggested_for": "",
                      "pending": [], "pending_for": ""}.items():
