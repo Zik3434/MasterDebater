@@ -420,6 +420,7 @@ def render_flow(full: bool) -> None:
                 st.error(f"Could not read that file: {e}")
 
 
+CX_PANEL_HEIGHT = 430   # questions box and answers box share this height, side by side
 CX_IDLE_SECONDS = 15   # auto-draft once the flow of their speech has been still this long
 
 
@@ -525,21 +526,25 @@ def cx_suggestions() -> None:
     if ss.get("cx_error"):
         st.error(cx_error_text(ss["cx_error"]))
     qs = r["cx"]["suggested"]
-    if qs:
-        with st.container(border=True):
-            st.markdown(f"**Suggested questions for their {r['cx'].get('suggested_for', '')}**")
+    with st.container(border=True, height=CX_PANEL_HEIGHT):
+        if qs:
+            h1, h2 = st.columns([1.9, 1])
+            h1.markdown(f"**Suggested questions for their {r['cx'].get('suggested_for', '')}**")
+            if h2.button("Add to mine", key="cx_add", width="stretch",
+                         help="Copy these questions and follow-ups into 'Questions I want to ask'"):
+                parts = []
+                for q in qs:
+                    parts.append(q["question"])
+                    parts += [f"    If they say {f.get('if_they_say', '')}: {f.get('ask', '')}" for f in q.get("follow_ups") or []]
+                lines = "\n".join(parts)
+                r["cx"]["ask"] = (r["cx"].get("ask", "").rstrip() + "\n" + lines).strip()
+                store.save_round(r)
+                st.rerun(scope="app")
             st.markdown(cx_questions_md(qs), unsafe_allow_html=True)
-        if st.button("Add these to my questions", key="cx_add"):
-            parts = []
-            for q in qs:
-                parts.append(q["question"])
-                parts += [f"    If they say {f.get('if_they_say', '')}: {f.get('ask', '')}" for f in q.get("follow_ups") or []]
-            lines = "\n".join(parts)
-            r["cx"]["ask"] = (r["cx"].get("ask", "").rstrip() + "\n" + lines).strip()
-            store.save_round(r)
-            st.rerun(scope="app")
-    elif not (snap["running"] and snap["round_id"] == r["id"]):
-        st.caption("No questions drafted yet.")
+        elif not (snap["running"] and snap["round_id"] == r["id"]):
+            st.markdown("**Suggested questions**")
+            st.caption("None drafted yet. Flow their constructive, then click Draft questions now, "
+                       "or turn on auto-draft.")
 
 
 def render_cx() -> None:
@@ -563,29 +568,30 @@ def render_cx() -> None:
                 st.rerun()
     snap = cx_job.snapshot()
     polling = snap["running"] and snap["round_id"] == ss["round"]["id"]
-    st.fragment(cx_suggestions, run_every=(3 if polling or mats.get("cx_auto") else None))()
-
-    st.divider()
-    st.caption("Everything on this tab is handed to the speech writer along with the flow. "
-               "Concessions, admissions and clarifications from cross-ex are the most valuable thing you can put here.")
-    c1, c2 = st.columns([1.4, 1])
-    with c1:
+    left, right = st.columns([1.25, 1])
+    with left:      # questions to ask
+        st.fragment(cx_suggestions, run_every=(3 if polling or mats.get("cx_auto") else None))()
+    with right:     # what they answer, typed while looking at the question
         rnd["cx"]["answers"] = st.text_area(
-            "What they said in cross-ex", rnd["cx"].get("answers", ""), height=420,
+            "What they said in cross-ex", rnd["cx"].get("answers", ""), height=CX_PANEL_HEIGHT - 30,
             placeholder="One per line, in your own words.\n"
                         "e.g. Conceded their framework has no answer to structural violence.\n"
                         "e.g. Said their Diamond card is about rent control, not a housing guarantee.\n"
                         "e.g. Could not name a single enforcement mechanism for the plan.",
         )
-    with c2:
+
+    b1, b2 = st.columns([1.25, 1])
+    with b1:
         rnd["cx"]["ask"] = st.text_area(
-            "Questions I want to ask", rnd["cx"].get("ask", ""), height=420,
+            "Questions I want to ask", rnd["cx"].get("ask", ""), height=200,
             placeholder="Your prep for cross-ex. The writer sees these too.",
         )
-    rnd["notes"] = st.text_area(
-        "Round notes", rnd.get("notes", ""), height=160,
-        placeholder="Judge paradigm, what to collapse to, anything else the writer should know.",
-    )
+    with b2:
+        rnd["notes"] = st.text_area(
+            "Round notes", rnd.get("notes", ""), height=200,
+            placeholder="Judge paradigm, what to collapse to, anything else the writer should know.",
+        )
+    st.caption("Everything on this tab is handed to the speech writer along with the flow.")
 
 
 def render_speech(full: bool) -> None:
