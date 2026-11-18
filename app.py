@@ -110,6 +110,8 @@ def reset_flow() -> None:
     for sh in rnd["sheets"]:
         sh["rows"] = [[""] * len(sh["columns"]) for _ in range(store.DEFAULT_ROWS)]
     rnd.pop("auto_preflow", None)
+    rnd["cx"]["suggested"], rnd["cx"]["suggested_for"] = [], ""
+    rnd["cx"]["pending"], rnd["cx"]["pending_for"] = [], ""
     store.save_round(rnd)
     bump_grids()
 
@@ -276,7 +278,10 @@ def absorb_grid_edits() -> None:
             if 0 <= r < len(sheet["rows"]):
                 for col, val in changes.items():
                     if col in cols:
-                        sheet["rows"][r][cols.index(col)] = "" if val is None else str(val)
+                        new = "" if val is None else str(val)
+                        if sheet["rows"][r][cols.index(col)] != new:
+                            sheet["rows"][r][cols.index(col)] = new
+                            ss["flow_edit_at"] = time.time()   # a cell was just typed
 
 
 def ensure_preflow(sd: str) -> None:
@@ -361,10 +366,13 @@ def render_flow(full: bool) -> None:
             rows = edited.fillna("").astype(str).values.tolist()
             if rows != sheet["rows"]:
                 sheet["rows"] = rows
-                if store.ensure_room(sheet):      # getting close to the bottom: add rows
-                    store.save_round(rnd)
-                    bump_grids()
-                    st.rerun()
+                ss["flow_edit_at"] = time.time()
+            # Checked on every run, not only when this block saw the change: edits are usually
+            # copied in earlier by absorb_grid_edits().
+            if store.ensure_room(sheet):          # getting close to the bottom: add rows
+                store.save_round(rnd)
+                bump_grids()
+                st.rerun()
             if not full:
                 st.caption("Click a cell and type. Enter moves down, Tab moves right. Drag across cells (or "
                            "Shift+click) to select several, then press the Delete key to clear them all. Rows are "
@@ -424,7 +432,7 @@ CX_PANEL_HEIGHT = 430   # questions box and answers box share this height, side 
 CX_IDLE_SECONDS = 15   # auto-draft once the flow of their speech has been still this long
 
 
-def start_cx_draft() -> str:
+def start_cx_draft(manual: bool = False) -> str:
     """Kick off a background draft for the opponent's latest constructive. Returns a status word."""
     r = ss["round"]
     target = store.cx_target(r, side)
@@ -435,23 +443,43 @@ def start_cx_draft() -> str:
     mtext = bundle_materials(store.materials_for_side(mats, side))
     res = mats.get("resolution", "")
     ok = cx_job.start(r["id"], sig, target,
-                      lambda: cc.draft_cx_questions(flow, side, target, mtext, res))
+                      lambda: cc.draft_cx_questions(flow, side, target, mtext, res), manual=manual)
     return "started" if ok else "busy"
 
 
+def show_cx_questions(r: dict, qs: list[dict], target: str) -> None:
+    r["cx"]["suggested"], r["cx"]["suggested_for"] = qs, target
+    r["cx"]["pending"], r["cx"]["pending_for"] = [], ""
+    store.save_round(r)
+
+
 def collect_cx() -> None:
-    """Copy a finished background draft into the round (main thread only)."""
-    snap = cx_job.snapshot()
-    if snap["running"] or snap["collected"]:
-        return
+    """Copy a finished background draft into the round (main thread only).
+
+    A new draft must not replace the list while the debater may be reading it: the open question
+    would close and the list would jump. So a finished draft is shown at once only when nothing is
+    shown yet, it is for a different speech, it was asked for with the button, or the flow was
+    edited after the draft began (the debater is flowing, not reading). Otherwise it waits behind
+    a "Show updated" button, and is shown automatically the next time the flow is edited."""
     r = ss["round"]
-    if snap["round_id"] == r["id"]:
-        if snap["questions"]:
-            r["cx"]["suggested"] = snap["questions"]
-            r["cx"]["suggested_for"] = snap["target"]
-            store.save_round(r)
-        ss["cx_error"] = snap["error"]
-    cx_job.mark_collected()
+    cx = r["cx"]
+    snap = cx_job.snapshot()
+    if not (snap["running"] or snap["collected"]):
+        if snap["round_id"] == r["id"]:
+            qs = snap["questions"]
+            if qs:
+                flowing = ss.get("flow_edit_at", 0) > snap["started_at"]
+                if (not cx["suggested"] or cx.get("suggested_for") != snap["target"]
+                        or snap["manual"] or flowing):
+                    show_cx_questions(r, qs, snap["target"])
+                elif qs != cx["suggested"]:
+                    cx["pending"], cx["pending_for"] = qs, snap["target"]
+                    ss["cx_pending_at"] = time.time()
+                    store.save_round(r)
+            ss["cx_error"] = snap["error"]
+        cx_job.mark_collected()
+    if cx.get("pending") and ss.get("flow_edit_at", 0) > ss.get("cx_pending_at", 0):
+        show_cx_questions(r, cx["pending"], cx.get("pending_for", ""))
 
 
 def cx_error_text(err: str) -> str:
@@ -501,6 +529,8 @@ def cx_engine() -> None:
                 running = True
             if running:
                 status = f"Drafting cross-ex questions for their {target}..."
+            elif r["cx"].get("pending"):
+                status = f"Updated cross-ex questions are waiting on the Cross-ex tab for their {target}."
             elif r["cx"]["suggested"] and done_for_sig:
                 status = f"{len(r['cx']['suggested'])} cross-ex questions ready for their {target}."
             else:
@@ -521,28 +551,32 @@ def cx_suggestions() -> None:
     collect_cx()
     r = ss["round"]
     snap = cx_job.snapshot()
-    if snap["running"] and snap["round_id"] == r["id"]:
-        st.info(f"Drafting questions for their {snap['target']}...")
     if ss.get("cx_error"):
         st.error(cx_error_text(ss["cx_error"]))
     qs = r["cx"]["suggested"]
-    with st.container(border=True, height=CX_PANEL_HEIGHT):
+    pending = r["cx"].get("pending") or []
+    # Header row is always there, so nothing below it moves when a button appears.
+    h1, h2, h3 = st.columns([1.7, 1.3, 1])
+    h1.markdown(f"**Questions for their {r['cx'].get('suggested_for', '')}**" if qs else "**Suggested questions**")
+    if pending and h2.button(f"Show {len(pending)} updated", key="cx_show_pending", type="primary", width="stretch",
+                             help="A newer set was drafted from your latest flow. It waits here so the "
+                                  "question you are reading is not replaced."):
+        show_cx_questions(r, pending, r["cx"].get("pending_for", ""))
+        st.rerun(scope="fragment")
+    if qs and h3.button("Add to mine", key="cx_add", width="stretch",
+                        help="Copy these questions and follow-ups into 'Questions I want to ask'"):
+        parts = []
+        for q in qs:
+            parts.append(q["question"])
+            parts += [f"    If they say {f.get('if_they_say', '')}: {f.get('ask', '')}" for f in q.get("follow_ups") or []]
+        lines = "\n".join(parts)
+        r["cx"]["ask"] = (r["cx"].get("ask", "").rstrip() + "\n" + lines).strip()
+        store.save_round(r)
+        st.rerun(scope="app")
+    with st.container(border=True, height=CX_PANEL_HEIGHT - 50):
         if qs:
-            h1, h2 = st.columns([1.9, 1])
-            h1.markdown(f"**Suggested questions for their {r['cx'].get('suggested_for', '')}**")
-            if h2.button("Add to mine", key="cx_add", width="stretch",
-                         help="Copy these questions and follow-ups into 'Questions I want to ask'"):
-                parts = []
-                for q in qs:
-                    parts.append(q["question"])
-                    parts += [f"    If they say {f.get('if_they_say', '')}: {f.get('ask', '')}" for f in q.get("follow_ups") or []]
-                lines = "\n".join(parts)
-                r["cx"]["ask"] = (r["cx"].get("ask", "").rstrip() + "\n" + lines).strip()
-                store.save_round(r)
-                st.rerun(scope="app")
             st.markdown(cx_questions_md(qs), unsafe_allow_html=True)
         elif not (snap["running"] and snap["round_id"] == r["id"]):
-            st.markdown("**Suggested questions**")
             st.caption("None drafted yet. Flow their constructive, then click Draft questions now, "
                        "or turn on auto-draft.")
 
@@ -562,7 +596,7 @@ def render_cx() -> None:
     with t2:
         if st.button("Draft questions now", width="stretch", type="primary"):
             ss["cx_error"] = None
-            if start_cx_draft() == "nothing":
+            if start_cx_draft(manual=True) == "nothing":
                 st.warning("Nothing to question yet. Flow their constructive first.")
             else:
                 st.rerun()

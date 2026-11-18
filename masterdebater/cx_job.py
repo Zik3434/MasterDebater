@@ -21,6 +21,8 @@ STATE: dict = {
     "error": None,
     "finished_at": None,
     "collected": True,    # True once the app has copied the result into the round
+    "started_at": 0.0,    # when the current or last job began
+    "manual": False,      # True when the debater clicked "Draft questions now"
 }
 
 
@@ -29,13 +31,14 @@ def snapshot() -> dict:
         return dict(STATE)
 
 
-def start(round_id: str, sig: str, target: str, fn: Callable[[], list[dict]]) -> bool:
+def start(round_id: str, sig: str, target: str, fn: Callable[[], list[dict]], manual: bool = False) -> bool:
     """Run fn on a background thread. Returns False if a job is already running."""
     with _lock:
         if STATE["running"]:
             return False
         STATE.update(running=True, round_id=round_id, sig=sig, target=target,
-                     questions=None, error=None, finished_at=None, collected=False)
+                     questions=None, error=None, finished_at=None, collected=False,
+                     started_at=time.time(), manual=manual)
 
     def work() -> None:
         try:
